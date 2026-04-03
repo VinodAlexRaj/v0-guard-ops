@@ -13,7 +13,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
-import { LogOut, AlertCircle, PieChart } from 'lucide-react'
+import { LogOut, BarChart3, MapPin, Users, Calendar, AlertCircle, PieChart } from 'lucide-react'
 
 export default function SupervisorOverviewPage() {
   const router = useRouter()
@@ -80,9 +80,41 @@ export default function SupervisorOverviewPage() {
   const dateStr = todayDate.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: '2-digit', year: 'numeric' })
 
   return (
-    <>
-      {/* Top Navigation */}
-      <header className="border-b border-slate-200 bg-white px-8 py-4">
+    <div className="flex min-h-screen bg-slate-50">
+      {/* Sidebar */}
+      <aside className="fixed left-0 top-0 h-screen w-64 border-r border-slate-200 bg-white p-6">
+        <div className="mb-8">
+          <h2 className="text-2xl font-bold text-slate-900">Guard Ops</h2>
+        </div>
+        <nav className="space-y-2">
+          {[
+            { label: 'Overview', icon: BarChart3, active: true, href: '/supervisor/overview' },
+            { label: 'My Sites', icon: MapPin, active: false, href: '/supervisor/sites' },
+            { label: 'Schedule', icon: Calendar, active: false, href: '#' },
+            { label: 'Attendance', icon: Users, active: false, href: '/supervisor/sites/KLSNT01/attendance' },
+            { label: 'Guards', icon: Users, active: false, href: '/supervisor/guards' },
+            { label: 'Leaves', icon: Calendar, active: false, href: '#' },
+          ].map((item) => (
+            <button
+              key={item.label}
+              onClick={() => item.href !== '#' && router.push(item.href)}
+              className={`w-full flex items-center gap-3 px-4 py-2 rounded-lg text-sm font-medium transition ${
+                item.active
+                  ? 'bg-teal-50 text-teal-700'
+                  : 'text-slate-700 hover:bg-slate-50'
+              }`}
+            >
+              <item.icon className="w-5 h-5" />
+              {item.label}
+            </button>
+          ))}
+        </nav>
+      </aside>
+
+      {/* Main Content */}
+      <main className="ml-64 flex-1">
+        {/* Top Navigation */}
+        <header className="border-b border-slate-200 bg-white px-8 py-4">
           <div className="flex items-center justify-between">
             <div className="text-sm text-slate-600">{dateStr}</div>
             <div className="flex items-center gap-4">
@@ -248,6 +280,7 @@ export default function SupervisorOverviewPage() {
             </Card>
           </div>
         </div>
-      </>
-    )
+      </main>
+    </div>
+  )
 }
