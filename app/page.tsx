@@ -1,35 +1,59 @@
-"use client"
+'use client'
 
-import { useState } from "react"
-import { useRouter } from "next/navigation"
-import { Card, CardContent, CardHeader } from "@/components/ui/card"
-import { Input } from "@/components/ui/input"
-import { Button } from "@/components/ui/button"
-import { Field, FieldGroup, FieldLabel } from "@/components/ui/field"
+import { useState } from 'react'
+import { supabase } from '@/lib/supabase/client'
+import { Card, CardContent, CardHeader } from '@/components/ui/card'
+import { Input } from '@/components/ui/input'
+import { Button } from '@/components/ui/button'
+import { Field, FieldGroup, FieldLabel } from '@/components/ui/field'
 
 export default function LoginPage() {
-  const router = useRouter()
-  const [email, setEmail] = useState("")
-  const [password, setPassword] = useState("")
-  const [error, setError] = useState("")
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
+  const [error, setError] = useState('')
   const [isLoading, setIsLoading] = useState(false)
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    setError("")
+    setError('')
     setIsLoading(true)
 
-    // Simulate a brief delay for UX
-    setTimeout(() => {
-      if (email === "vinod@blackgoldsecurity.my" && password === "BlackGold@2024") {
-        router.push("/manager/overview")
-      } else if (email === "azri@blackgoldsecurity.my" && password === "BlackGold@2024") {
-        router.push("/supervisor/overview")
-      } else {
-        setError("Invalid email or password")
+    try {
+      const { data, error: authError } = await supabase.auth.signInWithPassword({
+        email,
+        password,
+      })
+
+      if (authError) {
+        setError(authError.message || 'Invalid email or password')
         setIsLoading(false)
+        return
       }
-    }, 500)
+
+      if (data.user) {
+        // Query users_with_role view for the role
+        const { data: roleData, error: roleError } = await supabase
+          .from('users_with_role')
+          .select('role')
+          .eq('id', data.user.id)
+          .single()
+
+        if (roleError) {
+          setError('Failed to fetch user role')
+          setIsLoading(false)
+          return
+        }
+
+        if (roleData?.role === 'manager') {
+          window.location.href = '/manager/overview'
+        } else {
+          window.location.href = '/supervisor/overview'
+        }
+      }
+    } catch (err) {
+      setError('An error occurred. Please try again.')
+      setIsLoading(false)
+    }
   }
 
   return (
@@ -72,7 +96,7 @@ export default function LoginPage() {
                 <p className="text-sm text-red-600">{error}</p>
               )}
               <Button type="submit" className="w-full" disabled={isLoading}>
-                {isLoading ? "Signing in..." : "Sign in"}
+                {isLoading ? 'Signing in...' : 'Sign in'}
               </Button>
             </FieldGroup>
           </form>
