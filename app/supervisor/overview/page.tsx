@@ -88,16 +88,15 @@ export default function SupervisorOverviewPage() {
         </div>
         <nav className="space-y-2">
           {[
-            { label: 'Overview', icon: BarChart3, active: true, href: '/supervisor/overview' },
-            { label: 'My Sites', icon: MapPin, active: false, href: '/supervisor/sites' },
-            { label: 'Schedule', icon: Calendar, active: false, href: '#' },
-            { label: 'Attendance', icon: Users, active: false, href: '/supervisor/sites/KLSNT01/attendance' },
-            { label: 'Guards', icon: Users, active: false, href: '/supervisor/guards' },
-            { label: 'Leaves', icon: Calendar, active: false, href: '#' },
+            { label: 'Overview', icon: BarChart3, active: true },
+            { label: 'My Sites', icon: MapPin, active: false },
+            { label: 'Schedule', icon: Calendar, active: false },
+            { label: 'Attendance', icon: Users, active: false },
+            { label: 'Guards', icon: Users, active: false },
+            { label: 'Leaves', icon: Calendar, active: false },
           ].map((item) => (
             <button
               key={item.label}
-              onClick={() => item.href !== '#' && router.push(item.href)}
               className={`w-full flex items-center gap-3 px-4 py-2 rounded-lg text-sm font-medium transition ${
                 item.active
                   ? 'bg-teal-50 text-teal-700'
