@@ -12,7 +12,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
-import { LogOut, BarChart3, MapPin, Users, Calendar, AlertCircle, PieChart } from 'lucide-react'
+import { LogOut, AlertCircle, PieChart } from 'lucide-react'
 
 export default function ManagerOverviewPage() {
   const router = useRouter()
@@ -61,42 +61,9 @@ export default function ManagerOverviewPage() {
   const dateStr = todayDate.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: '2-digit', year: 'numeric' })
 
   return (
-    <div className="flex min-h-screen bg-slate-50">
-      {/* Sidebar */}
-      <aside className="fixed left-0 top-0 h-screen w-64 border-r border-slate-200 bg-white p-6">
-        <div className="mb-8">
-          <h2 className="text-2xl font-bold text-slate-900">Guard Ops</h2>
-        </div>
-        <nav className="space-y-2">
-          {[
-            { label: 'Overview', icon: BarChart3, active: true, href: '/manager/overview' },
-            { label: 'All Sites', icon: MapPin, active: false, href: '#' },
-            { label: 'Supervisors', icon: Users, active: false, href: '#' },
-            { label: 'Shift Setup', icon: Calendar, active: false, href: '#' },
-            { label: 'Guard Management', icon: Users, active: false, href: '#' },
-            { label: 'Leave Management', icon: Calendar, active: false, href: '#' },
-            { label: 'Reports', icon: BarChart3, active: false, href: '#' },
-          ].map((item) => (
-            <button
-              key={item.label}
-              onClick={() => item.href !== '#' && router.push(item.href)}
-              className={`w-full flex items-center gap-3 px-4 py-2 rounded-lg text-sm font-medium transition ${
-                item.active
-                  ? 'bg-slate-100 text-slate-900'
-                  : 'text-slate-700 hover:bg-slate-50'
-              }`}
-            >
-              <item.icon className="w-5 h-5" />
-              {item.label}
-            </button>
-          ))}
-        </nav>
-      </aside>
-
-      {/* Main Content */}
-      <main className="ml-64 flex-1">
-        {/* Top Navigation */}
-        <header className="border-b border-slate-200 bg-white px-8 py-4">
+    <>
+      {/* Top Navigation */}
+      <header className="border-b border-slate-200 bg-white px-8 py-4">
           <div className="flex items-center justify-between">
             <div className="text-sm text-slate-600">{dateStr}</div>
             <div className="flex items-center gap-4">
@@ -211,7 +178,7 @@ export default function ManagerOverviewPage() {
             </Card>
           </div>
         </div>
-      </main>
-    </div>
-  )
+      </>
+    )
+  }
 }

@@ -6,7 +6,7 @@ import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
-import { LogOut, BarChart3, MapPin, Users, Calendar, ArrowRight } from 'lucide-react'
+import { LogOut, ArrowRight } from 'lucide-react'
 
 interface Guard {
   id: string
@@ -153,38 +153,9 @@ export default function GuardsPage() {
   const inactiveCount = guards.filter((g) => g.status === 'Inactive').length
 
   return (
-    <div className="flex min-h-screen bg-slate-50">
-      {/* Sidebar */}
-      <aside className="fixed left-0 top-0 h-screen w-64 border-r border-slate-200 bg-white p-6">
-        <div className="mb-8">
-          <h2 className="text-2xl font-bold text-slate-900">Guard Ops</h2>
-        </div>
-        <nav className="space-y-2">
-          {[
-            { label: 'Overview', icon: BarChart3, active: false },
-            { label: 'My Sites', icon: MapPin, active: false },
-            { label: 'Schedule', icon: Calendar, active: false },
-            { label: 'Attendance', icon: Users, active: false },
-            { label: 'Guards', icon: Users, active: true },
-            { label: 'Leaves', icon: Calendar, active: false },
-          ].map((item) => (
-            <button
-              key={item.label}
-              className={`w-full flex items-center gap-3 px-4 py-2 rounded-lg text-sm font-medium transition ${
-                item.active ? 'bg-teal-50 text-teal-700' : 'text-slate-700 hover:bg-slate-50'
-              }`}
-            >
-              <item.icon className="w-5 h-5" />
-              {item.label}
-            </button>
-          ))}
-        </nav>
-      </aside>
-
-      {/* Main Content */}
-      <main className="ml-64 flex-1">
-        {/* Top Navigation */}
-        <header className="border-b border-slate-200 bg-white px-8 py-4">
+    <>
+      {/* Top Navigation */}
+      <header className="border-b border-slate-200 bg-white px-8 py-4">
           <div className="flex items-center justify-between">
             <div className="text-sm text-slate-600">
               {new Date().toLocaleDateString('en-US', {
@@ -397,7 +368,7 @@ export default function GuardsPage() {
             </div>
           </div>
         </div>
-      </main>
-    </div>
-  )
+      </>
+    )
+  }
 }
