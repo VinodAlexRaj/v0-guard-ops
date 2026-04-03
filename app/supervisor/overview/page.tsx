@@ -250,5 +250,4 @@ export default function SupervisorOverviewPage() {
         </div>
       </>
     )
-  }
 }
