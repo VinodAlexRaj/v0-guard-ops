@@ -13,7 +13,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
-import { LogOut, BarChart3, MapPin, Users, Calendar, AlertCircle, PieChart } from 'lucide-react'
+import { LogOut, AlertCircle, PieChart } from 'lucide-react'
 
 export default function SupervisorOverviewPage() {
   const router = useRouter()
@@ -80,64 +80,33 @@ export default function SupervisorOverviewPage() {
   const dateStr = todayDate.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: '2-digit', year: 'numeric' })
 
   return (
-    <div className="flex min-h-screen bg-slate-50">
-      {/* Sidebar */}
-      <aside className="fixed left-0 top-0 h-screen w-64 border-r border-slate-200 bg-white p-6">
-        <div className="mb-8">
-          <h2 className="text-2xl font-bold text-slate-900">Guard Ops</h2>
-        </div>
-        <nav className="space-y-2">
-          {[
-            { label: 'Overview', icon: BarChart3, active: true },
-            { label: 'My Sites', icon: MapPin, active: false },
-            { label: 'Schedule', icon: Calendar, active: false },
-            { label: 'Attendance', icon: Users, active: false },
-            { label: 'Guards', icon: Users, active: false },
-            { label: 'Leaves', icon: Calendar, active: false },
-          ].map((item) => (
-            <button
-              key={item.label}
-              className={`w-full flex items-center gap-3 px-4 py-2 rounded-lg text-sm font-medium transition ${
-                item.active
-                  ? 'bg-teal-50 text-teal-700'
-                  : 'text-slate-700 hover:bg-slate-50'
-              }`}
-            >
-              <item.icon className="w-5 h-5" />
-              {item.label}
-            </button>
-          ))}
-        </nav>
-      </aside>
-
-      {/* Main Content */}
-      <main className="ml-64 flex-1">
-        {/* Top Navigation */}
-        <header className="border-b border-slate-200 bg-white px-8 py-4">
-          <div className="flex items-center justify-between">
-            <div className="text-sm text-slate-600">{dateStr}</div>
-            <div className="flex items-center gap-4">
-              <div className="text-right">
-                <p className="text-sm font-medium text-slate-900">Azri Hamdan</p>
-                <Badge variant="secondary" className="mt-1">
-                  Supervisor
-                </Badge>
-              </div>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={handleSignOut}
-                className="text-slate-600 hover:text-slate-900"
-              >
-                <LogOut className="w-4 h-4 mr-2" />
-                Sign out
-              </Button>
+    <>
+      {/* Top Navigation */}
+      <header className="border-b border-slate-200 bg-white px-8 py-4">
+        <div className="flex items-center justify-between">
+          <div className="text-sm text-slate-600">{dateStr}</div>
+          <div className="flex items-center gap-4">
+            <div className="text-right">
+              <p className="text-sm font-medium text-slate-900">Azri Hamdan</p>
+              <Badge variant="secondary" className="mt-1">
+                Supervisor
+              </Badge>
             </div>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={handleSignOut}
+              className="text-slate-600 hover:text-slate-900"
+            >
+              <LogOut className="w-4 h-4 mr-2" />
+              Sign out
+            </Button>
           </div>
-        </header>
+        </div>
+      </header>
 
-        {/* Page Content */}
-        <div className="p-8">
+      {/* Page Content */}
+      <div className="p-8">
           {/* Stats Cards */}
           <div className="grid grid-cols-4 gap-4 mb-8">
             {stats.map((stat, idx) => {
@@ -279,7 +248,6 @@ export default function SupervisorOverviewPage() {
             </Card>
           </div>
         </div>
-      </main>
-    </div>
-  )
-}
+      </>
+    )
+  }
