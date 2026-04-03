@@ -69,16 +69,17 @@ export default function ManagerOverviewPage() {
         </div>
         <nav className="space-y-2">
           {[
-            { label: 'Overview', icon: BarChart3, active: true },
-            { label: 'All Sites', icon: MapPin, active: false },
-            { label: 'Supervisors', icon: Users, active: false },
-            { label: 'Shift Setup', icon: Calendar, active: false },
-            { label: 'Guard Management', icon: Users, active: false },
-            { label: 'Leave Management', icon: Calendar, active: false },
-            { label: 'Reports', icon: BarChart3, active: false },
+            { label: 'Overview', icon: BarChart3, active: true, href: '/manager/overview' },
+            { label: 'All Sites', icon: MapPin, active: false, href: '#' },
+            { label: 'Supervisors', icon: Users, active: false, href: '#' },
+            { label: 'Shift Setup', icon: Calendar, active: false, href: '#' },
+            { label: 'Guard Management', icon: Users, active: false, href: '#' },
+            { label: 'Leave Management', icon: Calendar, active: false, href: '#' },
+            { label: 'Reports', icon: BarChart3, active: false, href: '#' },
           ].map((item) => (
             <button
               key={item.label}
+              onClick={() => item.href !== '#' && router.push(item.href)}
               className={`w-full flex items-center gap-3 px-4 py-2 rounded-lg text-sm font-medium transition ${
                 item.active
                   ? 'bg-slate-100 text-slate-900'
