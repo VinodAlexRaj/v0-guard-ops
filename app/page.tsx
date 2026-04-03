@@ -1,7 +1,6 @@
 'use client'
 
 import { useState } from 'react'
-import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { Card, CardContent, CardHeader } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -9,7 +8,6 @@ import { Button } from '@/components/ui/button'
 import { Field, FieldGroup, FieldLabel } from '@/components/ui/field'
 
 export default function LoginPage() {
-  const router = useRouter()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
@@ -36,9 +34,9 @@ export default function LoginPage() {
       if (data.user) {
         const role = data.user.user_metadata?.role || 'supervisor'
         if (role === 'manager') {
-          router.push('/manager/overview')
+          window.location.href = '/manager/overview'
         } else {
-          router.push('/supervisor/overview')
+          window.location.href = '/supervisor/overview'
         }
       }
     } catch (err) {
