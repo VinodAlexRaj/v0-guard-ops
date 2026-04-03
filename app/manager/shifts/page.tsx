@@ -14,6 +14,9 @@ export default function ShiftsPage() {
   const [searchQuery, setSearchQuery] = useState('')
   const [editingShift, setEditingShift] = useState<any>(null)
   const [isEditModalOpen, setIsEditModalOpen] = useState(false)
+  const [isAddMode, setIsAddMode] = useState(false)
+  const [siteShifts, setSiteShifts] = useState<Record<string, any[]>>({})
+  const [formValues, setFormValues] = useState<any>({})
 
   const handleSignOut = () => {
     router.push('/')
@@ -106,7 +109,7 @@ export default function ShiftsPage() {
   )
 
   const selectedSite = sites.find((s) => s.code === selectedSiteCode)
-  const selectedShifts = shifts[selectedSiteCode] || []
+  const selectedShifts = [...(shifts[selectedSiteCode] || []), ...(siteShifts[selectedSiteCode] || [])]
 
   const getTypeBadgeColor = (type: string) => {
     switch (type) {
@@ -123,14 +126,54 @@ export default function ShiftsPage() {
     }
   }
 
+  const emptyForm = {
+    name: '', code: '', startTime: '', endTime: '',
+    headcount: 1, days: [] as string[], startDate: '', endDate: '',
+    type: 'Contract', isActive: true,
+  }
+
   const handleEditShift = (shift: any) => {
+    setIsAddMode(false)
     setEditingShift(shift)
+    setFormValues({ ...shift })
     setIsEditModalOpen(true)
   }
 
+  const handleAddShift = () => {
+    setIsAddMode(true)
+    setEditingShift(null)
+    setFormValues({ ...emptyForm })
+    setIsEditModalOpen(true)
+  }
+
+  const handleFormChange = (field: string, value: any) => {
+    setFormValues((prev: any) => ({ ...prev, [field]: value }))
+  }
+
+  const handleDayToggle = (day: string) => {
+    setFormValues((prev: any) => {
+      const days: string[] = prev.days || []
+      return {
+        ...prev,
+        days: days.includes(day) ? days.filter((d: string) => d !== day) : [...days, day],
+      }
+    })
+  }
+
   const handleSaveShift = () => {
+    if (isAddMode) {
+      const newShift = {
+        ...formValues,
+        id: Date.now(),
+      }
+      setSiteShifts((prev) => ({
+        ...prev,
+        [selectedSiteCode]: [...(prev[selectedSiteCode] || []), newShift],
+      }))
+    }
     setIsEditModalOpen(false)
     setEditingShift(null)
+    setIsAddMode(false)
   }
 
   const todayDate = new Date(2026, 3, 10)
@@ -213,7 +256,7 @@ export default function ShiftsPage() {
                     {selectedSite.code} — {selectedSite.name}
                   </h2>
                 </div>
-                <Button className="bg-teal-600 hover:bg-teal-700">
+                <Button className="bg-teal-600 hover:bg-teal-700" onClick={handleAddShift}>
                   <Plus className="w-4 h-4 mr-2" />
                   Add shift
                 </Button>
@@ -293,49 +336,75 @@ export default function ShiftsPage() {
         </div>
       </div>
 
-      {/* Edit Modal */}
-      {isEditModalOpen && editingShift && (
+      {/* Edit / Add Modal */}
+      {isEditModalOpen && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <Card className="w-full max-w-2xl">
+          <Card className="w-full max-w-2xl max-h-[90vh] overflow-y-auto">
             <div className="p-6">
-              <h2 className="text-xl font-bold text-slate-900 mb-6">Edit Shift</h2>
+              <h2 className="text-xl font-bold text-slate-900 mb-6">
+                {isAddMode ? 'Add new shift' : 'Edit Shift'}
+              </h2>
 
               <div className="space-y-4 mb-6">
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <label className="block text-sm font-medium text-slate-700 mb-2">Shift Name</label>
-                    <Input type="text" defaultValue={editingShift.name} />
+                    <Input
+                      type="text"
+                      value={formValues.name || ''}
+                      onChange={(e) => handleFormChange('name', e.target.value)}
+                      placeholder="e.g. Morning"
+                    />
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-slate-700 mb-2">Shift Code</label>
-                    <Input type="text" defaultValue={editingShift.code} />
+                    <Input
+                      type="text"
+                      value={formValues.code || ''}
+                      onChange={(e) => handleFormChange('code', e.target.value)}
+                      placeholder="e.g. MRN-01"
+                    />
                   </div>
                 </div>
 
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <label className="block text-sm font-medium text-slate-700 mb-2">Start Time</label>
-                    <Input type="time" defaultValue={editingShift.startTime} />
+                    <Input
+                      type="time"
+                      value={formValues.startTime || ''}
+                      onChange={(e) => handleFormChange('startTime', e.target.value)}
+                    />
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-slate-700 mb-2">End Time</label>
-                    <Input type="time" defaultValue={editingShift.endTime} />
+                    <Input
+                      type="time"
+                      value={formValues.endTime || ''}
+                      onChange={(e) => handleFormChange('endTime', e.target.value)}
+                    />
                   </div>
                 </div>
 
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-2">Required Headcount</label>
-                  <Input type="number" defaultValue={editingShift.headcount} min="1" />
+                  <Input
+                    type="number"
+                    value={formValues.headcount || 1}
+                    onChange={(e) => handleFormChange('headcount', parseInt(e.target.value))}
+                    min="1"
+                  />
                 </div>
 
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-2">Days of Week</label>
-                  <div className="flex gap-2">
+                  <div className="flex gap-4 flex-wrap">
                     {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((day) => (
-                      <label key={day} className="flex items-center gap-2">
+                      <label key={day} className="flex items-center gap-2 cursor-pointer">
                         <input
                           type="checkbox"
-                          defaultChecked={editingShift.days.includes(day)}
+                          checked={(formValues.days || []).includes(day)}
+                          onChange={() => handleDayToggle(day)}
                           className="w-4 h-4 rounded border-slate-300"
                         />
                         <span className="text-sm text-slate-700">{day}</span>
@@ -347,17 +416,31 @@ export default function ShiftsPage() {
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <label className="block text-sm font-medium text-slate-700 mb-2">Start Date</label>
-                    <Input type="text" defaultValue={editingShift.startDate} />
+                    <Input
+                      type="text"
+                      value={formValues.startDate || ''}
+                      onChange={(e) => handleFormChange('startDate', e.target.value)}
+                      placeholder="e.g. 01 Jan 2026"
+                    />
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-slate-700 mb-2">End Date</label>
-                    <Input type="text" defaultValue={editingShift.endDate} />
+                    <Input
+                      type="text"
+                      value={formValues.endDate || ''}
+                      onChange={(e) => handleFormChange('endDate', e.target.value)}
+                      placeholder="e.g. 31 Dec 2026"
+                    />
                   </div>
                 </div>
 
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-2">Type</label>
-                  <select className="w-full px-3 py-2 border border-slate-300 rounded-md text-sm">
+                  <select
+                    value={formValues.type || 'Contract'}
+                    onChange={(e) => handleFormChange('type', e.target.value)}
+                    className="w-full px-3 py-2 border border-slate-300 rounded-md text-sm text-slate-900"
+                  >
                     <option>Contract</option>
                     <option>Training</option>
                     <option>Temporary</option>
@@ -367,8 +450,13 @@ export default function ShiftsPage() {
                   </select>
                 </div>
 
-                <label className="flex items-center gap-2">
-                  <input type="checkbox" className="w-4 h-4 rounded border-slate-300" />
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={formValues.isChargeable || false}
+                    onChange={(e) => handleFormChange('isChargeable', e.target.checked)}
+                    className="w-4 h-4 rounded border-slate-300"
+                  />
                   <span className="text-sm text-slate-700">Is Chargeable</span>
                 </label>
               </div>
@@ -376,7 +464,7 @@ export default function ShiftsPage() {
               <div className="flex justify-end gap-3">
                 <Button
                   variant="outline"
-                  onClick={() => setIsEditModalOpen(false)}
+                  onClick={() => { setIsEditModalOpen(false); setIsAddMode(false) }}
                   className="text-slate-700 border-slate-300"
                 >
                   Cancel
