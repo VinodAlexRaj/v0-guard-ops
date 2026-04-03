@@ -216,14 +216,12 @@ export default function GuardsPage() {
 
         {/* Page Content */}
         <div className="p-8">
-          {/* Header */}
-          <div className="mb-6">
-            <h1 className="text-3xl font-bold text-slate-900 mb-1">Guards</h1>
-            <p className="text-slate-600">64 guards across your 22 sites</p>
-          </div>
-
-          {/* Search Bar */}
-          <div className="mb-6">
+          {/* Header with Search */}
+          <div className="mb-6 flex items-start justify-between">
+            <div>
+              <h1 className="text-3xl font-bold text-slate-900 mb-1">Guards</h1>
+              <p className="text-slate-600">64 guards across your 22 sites</p>
+            </div>
             <Input
               type="text"
               placeholder="Search name or code..."
@@ -234,7 +232,7 @@ export default function GuardsPage() {
           </div>
 
           {/* Filter Bars */}
-          <div className="mb-6 space-y-4">
+          <div className="mb-6 flex gap-8">
             {/* Status Filter */}
             <div className="flex items-center gap-3">
               <span className="text-sm font-medium text-slate-700">Status:</span>
@@ -391,9 +389,18 @@ export default function GuardsPage() {
           <div className="mt-6 flex items-center justify-between">
             <span className="text-sm text-slate-600">Showing {filteredGuards.length} of 64 guards</span>
             <div className="flex gap-6 text-sm font-medium">
-              <span className="text-green-700">{activeCount} active</span>
-              <span className="text-amber-700">{onLeaveCount} on leave today</span>
-              <span className="text-slate-600">{inactiveCount} inactive</span>
+              <div className="flex items-center gap-2">
+                <div className="w-2 h-2 rounded-full bg-green-600"></div>
+                <span className="text-green-600">{activeCount} active</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="w-2 h-2 rounded-full bg-amber-600"></div>
+                <span className="text-amber-600">{onLeaveCount} on leave</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="w-2 h-2 rounded-full bg-slate-400"></div>
+                <span className="text-slate-600">{inactiveCount} inactive</span>
+              </div>
             </div>
           </div>
         </div>
