@@ -1,5 +1,6 @@
 'use client'
 
+import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -19,10 +20,6 @@ export default function ManagerSupervisorsPage() {
 
   const handleSignOut = () => {
     router.push('/')
-  }
-
-  const handleViewSupervisor = (id: string) => {
-    router.push(`/manager/supervisors/${id}`)
   }
 
   const supervisors = [
@@ -178,10 +175,12 @@ export default function ManagerSupervisorsPage() {
                     <Button
                       variant="outline"
                       size="sm"
-                      onClick={() => handleViewSupervisor(supervisor.id)}
+                      asChild
                       className="text-slate-700 border-slate-300 hover:bg-slate-50"
                     >
-                      View
+                      <Link href={`/manager/supervisors/${supervisor.code}`}>
+                        View
+                      </Link>
                     </Button>
                   </td>
                 </tr>
