@@ -21,11 +21,10 @@ export default function LoginPage() {
 
     // Simulate a brief delay for UX
     setTimeout(() => {
-      if (
-        email === "vinod@blackgoldsecurity.my" &&
-        password === "BlackGold@2024"
-      ) {
+      if (email === "vinod@blackgoldsecurity.my" && password === "BlackGold@2024") {
         router.push("/manager/overview")
+      } else if (email === "azri@blackgoldsecurity.my" && password === "BlackGold@2024") {
+        router.push("/supervisor/overview")
       } else {
         setError("Invalid email or password")
         setIsLoading(false)
