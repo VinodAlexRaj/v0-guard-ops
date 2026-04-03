@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { createClient } from '@/lib/supabase/client'
+import { supabase } from '@/lib/supabase/client'
 import { Card, CardContent, CardHeader } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
@@ -19,7 +19,6 @@ export default function LoginPage() {
     setIsLoading(true)
 
     try {
-      const supabase = createClient()
       const { data, error: authError } = await supabase.auth.signInWithPassword({
         email,
         password,
@@ -32,8 +31,20 @@ export default function LoginPage() {
       }
 
       if (data.user) {
-        const role = data.user.user_metadata?.role || 'supervisor'
-        if (role === 'manager') {
+        // Query users_with_role view for the role
+        const { data: roleData, error: roleError } = await supabase
+          .from('users_with_role')
+          .select('role')
+          .eq('id', data.user.id)
+          .single()
+
+        if (roleError) {
+          setError('Failed to fetch user role')
+          setIsLoading(false)
+          return
+        }
+
+        if (roleData?.role === 'manager') {
           window.location.href = '/manager/overview'
         } else {
           window.location.href = '/supervisor/overview'
