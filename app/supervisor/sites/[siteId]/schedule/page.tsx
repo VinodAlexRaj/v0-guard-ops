@@ -749,15 +749,21 @@ export default function SchedulePage() {
                         })}
                       </div>
 
-                      {/* Save Button */}
-                      <Button
-                        onClick={saveAssignment}
-                        disabled={!selectedGuard}
-                        className="w-full bg-teal-600 hover:bg-teal-700"
-                        size="sm"
-                      >
-                        Save
-                      </Button>
+                        {/* Save Button */}
+                        {cellData.filled >= cellData.required ? (
+                          <div className="text-center text-sm text-amber-600 font-medium py-2 bg-amber-50 rounded">
+                            Slot is full ({cellData.filled}/{cellData.required})
+                          </div>
+                        ) : (
+                          <Button
+                            onClick={saveAssignment}
+                            disabled={!selectedGuard || !selectedSlot}
+                            className="w-full bg-teal-600 hover:bg-teal-700"
+                            size="sm"
+                          >
+                            Save
+                          </Button>
+                        )}
                     </div>
                   </>
                 )
