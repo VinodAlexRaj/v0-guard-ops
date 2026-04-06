@@ -6,7 +6,7 @@ import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
-import { LogOut, Check, X, RefreshCw } from 'lucide-react'
+import { LogOut, RefreshCw } from 'lucide-react'
 
 export default function ManagerLeavesPage() {
   const router = useRouter()
@@ -16,7 +16,7 @@ export default function ManagerLeavesPage() {
   const [searchQuery, setSearchQuery] = useState('')
   const [statusFilter, setStatusFilter] = useState('All')
   const [typeFilter, setTypeFilter] = useState('All')
-  const [leaveRecords, setLeaveRecords] = useState([
+  const leaveRecords = [
     { id: 1, name: 'Nora Baharom', code: 'SO0001', type: 'AL', startDate: '10 Apr', endDate: '11 Apr', status: 'Approved' },
     { id: 2, name: 'Kamal Aizuddin', code: 'SO0091', type: 'MC', startDate: '12 Apr', endDate: '12 Apr', status: 'Approved' },
     { id: 3, name: 'Hafiz Daud', code: 'SO0033', type: 'EL', startDate: '13 Apr', endDate: '13 Apr', status: 'Approved' },
@@ -25,18 +25,10 @@ export default function ManagerLeavesPage() {
     { id: 6, name: 'Rajan Muthu', code: 'SN0078', type: 'AL', startDate: '01 May', endDate: '03 May', status: 'Pending' },
     { id: 7, name: 'Lim Chee Hoe', code: 'SO0020', type: 'UL', startDate: '05 May', endDate: '05 May', status: 'Pending' },
     { id: 8, name: 'Mei Ling', code: 'SO0015', type: 'MC', startDate: '28 Apr', endDate: '28 Apr', status: 'Rejected' },
-  ])
+  ]
 
   const handleSignOut = () => {
     router.push('/')
-  }
-
-  const handleApprove = (id: number) => {
-    setLeaveRecords(leaveRecords.map(r => r.id === id ? { ...r, status: 'Approved' } : r))
-  }
-
-  const handleReject = (id: number) => {
-    setLeaveRecords(leaveRecords.map(r => r.id === id ? { ...r, status: 'Rejected' } : r))
   }
 
   const filteredRecords = leaveRecords.filter(record => {
@@ -154,6 +146,16 @@ export default function ManagerLeavesPage() {
           </div>
         </div>
 
+        {/* Info Banner */}
+        <div className="mb-4 p-4 bg-blue-50 border border-blue-200 rounded-lg flex items-start gap-3">
+          <div className="w-5 h-5 rounded-full bg-blue-500 flex items-center justify-center flex-shrink-0 mt-0.5">
+            <span className="text-white text-xs font-bold">i</span>
+          </div>
+          <p className="text-sm text-blue-800">
+            Leave approvals are managed in Info-Tech HRMS. This page displays synced data only.
+          </p>
+        </div>
+
         {/* Leave Requests Table */}
         <Card className="border-slate-200 overflow-hidden mb-6">
           <table className="w-full">
@@ -163,7 +165,6 @@ export default function ManagerLeavesPage() {
                 <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700">Type</th>
                 <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700">Date</th>
                 <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700">Status</th>
-                <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700">Action</th>
               </tr>
             </thead>
             <tbody>
@@ -191,31 +192,6 @@ export default function ManagerLeavesPage() {
                       {record.status}
                     </Badge>
                   </td>
-                  <td className="px-4 py-3">
-                    {record.status === 'Pending' ? (
-                      <div className="flex gap-2">
-                        <Button
-                          size="sm"
-                          onClick={() => handleApprove(record.id)}
-                          className="bg-green-600 hover:bg-green-700 text-white"
-                        >
-                          <Check className="w-4 h-4 mr-1" />
-                          Approve
-                        </Button>
-                        <Button
-                          size="sm"
-                          onClick={() => handleReject(record.id)}
-                          variant="outline"
-                          className="text-red-600 border-red-200 hover:bg-red-50"
-                        >
-                          <X className="w-4 h-4 mr-1" />
-                          Reject
-                        </Button>
-                      </div>
-                    ) : (
-                      <span className="text-sm text-slate-500">—</span>
-                    )}
-                  </td>
                 </tr>
               ))}
             </tbody>
@@ -225,8 +201,8 @@ export default function ManagerLeavesPage() {
         {/* Sync Section */}
         <Card className="border-slate-200 p-4 flex items-center justify-between">
           <div>
-            <p className="text-sm font-medium text-slate-900">Sync with leave system</p>
-            <p className="text-xs text-slate-600">Last synced: 2 hours ago</p>
+            <p className="text-sm font-medium text-slate-900">Leave data is synced from Info-Tech HRMS</p>
+            <p className="text-xs text-slate-600">Approvals and rejections must be done in the HR system. Last synced: 2 hours ago</p>
           </div>
           <Button
             disabled
