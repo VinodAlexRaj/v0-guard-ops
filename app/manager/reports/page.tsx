@@ -24,11 +24,47 @@ export default function ManagerReportsPage() {
     alert('Export coming soon')
   }
 
+  const getColorClass = (color: string) => {
+    switch (color) {
+      case 'green':
+        return 'bg-green-600'
+      case 'amber':
+        return 'bg-amber-600'
+      case 'red':
+        return 'bg-red-600'
+      case 'purple':
+        return 'bg-purple-600'
+      default:
+        return 'bg-slate-600'
+    }
+  }
+
+  const getRateBadgeClass = (rate: number) => {
+    if (rate >= 90) return 'bg-green-100 text-green-700'
+    if (rate >= 70) return 'bg-amber-100 text-amber-700'
+    return 'bg-red-100 text-red-700'
+  }
+
   const supervisors = [
     { name: 'Azri Hamdan', rate: 83, status: 'amber' },
     { name: 'Farah Izzati', rate: 90, status: 'green' },
     { name: 'Rajesh Kumar', rate: 76, status: 'red' },
     { name: 'Tan Wei Ling', rate: 97, status: 'green' },
+  ]
+
+  const attendanceStats = [
+    { label: 'On time', percentage: 78, color: 'green' },
+    { label: 'Late', percentage: 12, color: 'amber' },
+    { label: 'Absent', percentage: 7, color: 'red' },
+    { label: 'On leave', percentage: 3, color: 'purple' },
+  ]
+
+  const guardAttendance = [
+    { name: 'Ahmad Razif', onTime: 18, late: 2, absent: 1, otHours: '3.5 hrs', rate: 86 },
+    { name: 'Siti Norizan', onTime: 20, late: 1, absent: 0, otHours: '0 hrs', rate: 95 },
+    { name: 'Rajan Muthu', onTime: 19, late: 0, absent: 2, otHours: '1.5 hrs', rate: 90 },
+    { name: 'Kamal Aizuddin', onTime: 15, late: 3, absent: 3, otHours: '0 hrs', rate: 71 },
+    { name: 'Nora Baharom', onTime: 12, late: 1, absent: 0, otHours: '0 hrs', rate: 92 },
   ]
 
   const sitesWithGaps = [
@@ -258,7 +294,86 @@ export default function ManagerReportsPage() {
             </div>
           )}
           {activeTab === 'attendance' && (
-            <p className="text-slate-600">Attendance content</p>
+            <div className="space-y-6">
+              {/* Summary Cards */}
+              <div className="grid grid-cols-4 gap-4">
+                {attendanceStats.map((stat) => (
+                  <Card key={stat.label} className="border-slate-200 p-4">
+                    <p className="text-xs text-slate-600 mb-2">{stat.label}</p>
+                    <p
+                      className={`text-3xl font-bold ${
+                        stat.color === 'green'
+                          ? 'text-green-600'
+                          : stat.color === 'amber'
+                            ? 'text-amber-600'
+                            : stat.color === 'red'
+                              ? 'text-red-600'
+                              : 'text-purple-600'
+                      }`}
+                    >
+                      {stat.percentage}%
+                    </p>
+                  </Card>
+                ))}
+              </div>
+
+              {/* Attendance Breakdown Chart */}
+              <Card className="border-slate-200 p-6">
+                <h3 className="font-semibold text-slate-900 mb-6">Attendance breakdown</h3>
+                <div className="space-y-4">
+                  {attendanceStats.map((stat) => (
+                    <div key={stat.label} className="flex items-center gap-4">
+                      <div className="w-24 text-sm font-medium text-slate-700">{stat.label}</div>
+                      <div className="flex-1 flex items-center gap-2">
+                        <div className="flex-1 h-8 bg-slate-100 rounded flex items-center overflow-hidden">
+                          <div
+                            className={`h-full flex items-center justify-end pr-2 ${getColorClass(stat.color)}`}
+                            style={{ width: `${stat.percentage}%` }}
+                          >
+                            <span className="text-xs font-bold text-white">{stat.percentage}%</span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </Card>
+
+              {/* Guard Attendance Table */}
+              <Card className="border-slate-200 overflow-hidden">
+                <div className="p-6 border-b border-slate-200">
+                  <h3 className="font-semibold text-slate-900">Guard attendance this period</h3>
+                </div>
+                <table className="w-full">
+                  <thead className="bg-slate-50">
+                    <tr className="border-b border-slate-200">
+                      <th className="px-6 py-3 text-left text-xs font-semibold text-slate-700">Guard</th>
+                      <th className="px-6 py-3 text-left text-xs font-semibold text-slate-700">On time</th>
+                      <th className="px-6 py-3 text-left text-xs font-semibold text-slate-700">Late</th>
+                      <th className="px-6 py-3 text-left text-xs font-semibold text-slate-700">Absent</th>
+                      <th className="px-6 py-3 text-left text-xs font-semibold text-slate-700">OT hours</th>
+                      <th className="px-6 py-3 text-left text-xs font-semibold text-slate-700">Rate</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {guardAttendance.map((guard) => (
+                      <tr key={guard.name} className="border-b border-slate-200 hover:bg-slate-50">
+                        <td className="px-6 py-3 text-sm font-medium text-slate-900">{guard.name}</td>
+                        <td className="px-6 py-3 text-sm text-slate-700">{guard.onTime}</td>
+                        <td className="px-6 py-3 text-sm text-slate-700">{guard.late}</td>
+                        <td className="px-6 py-3 text-sm text-slate-700">{guard.absent}</td>
+                        <td className="px-6 py-3 text-sm text-slate-700">{guard.otHours}</td>
+                        <td className="px-6 py-3">
+                          <Badge variant="secondary" className={getRateBadgeClass(guard.rate)}>
+                            {guard.rate}%
+                          </Badge>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </Card>
+            </div>
           )}
           {activeTab === 'leave' && (
             <p className="text-slate-600">Leave content</p>
