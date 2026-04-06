@@ -147,6 +147,12 @@ export default function SchedulePage() {
       setShiftDefs(shiftDefsData || [])
       setAssignments(assignmentsData || [])
       setGuardNames(guardsData || [])
+
+      // Debug: Log full data structures
+      console.log('[v0] Slots data:', JSON.stringify(slotsData?.slice(0, 3), null, 2))
+      console.log('[v0] Shift definitions:', JSON.stringify(shiftDefsData, null, 2))
+      console.log('[v0] Assignments data:', JSON.stringify(assignmentsData, null, 2))
+      console.log('[v0] Guards data:', JSON.stringify(guardsData, null, 2))
     } catch (err) {
       console.error('[v0] fetchSchedule error:', err)
       throw err
@@ -260,7 +266,7 @@ export default function SchedulePage() {
 
   function buildRosterGrid() {
     // Initialize grid: 3 shifts × 7 days
-    const grid = [
+    const grid: any[][][] = [
       Array(7).fill(null).map(() => []),
       Array(7).fill(null).map(() => []),
       Array(7).fill(null).map(() => []),
@@ -271,20 +277,44 @@ export default function SchedulePage() {
     const shiftDefMap = new Map(shiftDefs.map(s => [s.id, s]))
     const guardMap = new Map(guardNames.map(g => [g.id, g]))
 
+    console.log('[v0] buildRosterGrid called with:', {
+      slotsCount: slots.length,
+      shiftDefsCount: shiftDefs.length,
+      assignmentsCount: assignments.length,
+      guardNamesCount: guardNames.length,
+    })
+
     // Place assignments in grid
     assignments.forEach((assignment: any) => {
       const slot = slotMap.get(assignment.roster_slot_id)
-      if (!slot) return
+      if (!slot) {
+        console.log('[v0] No slot found for assignment:', assignment.roster_slot_id)
+        return
+      }
 
       const shiftDef = shiftDefMap.get(slot.shift_definition_id)
-      if (!shiftDef) return
+      if (!shiftDef) {
+        console.log('[v0] No shiftDef found for slot:', slot.shift_definition_id)
+        return
+      }
 
       const guard = guardMap.get(assignment.guard_id)
-      if (!guard) return
+      if (!guard) {
+        console.log('[v0] No guard found for assignment:', assignment.guard_id)
+        return
+      }
 
       const shiftDate = new Date(slot.shift_date)
       const dayIndex = (shiftDate.getDay() + 6) % 7 // Convert Sunday=0 to Monday=0
       const shiftIndex = shifts.findIndex(s => s.code === shiftDef.shift_code)
+
+      console.log('[v0] Placing assignment:', {
+        guard: guard.full_name,
+        shiftCode: shiftDef.shift_code,
+        shiftIndex,
+        dayIndex,
+        date: slot.shift_date,
+      })
 
       if (shiftIndex >= 0 && dayIndex >= 0 && dayIndex < 7) {
         grid[shiftIndex][dayIndex].push([
@@ -306,6 +336,30 @@ export default function SchedulePage() {
   function getAssignedCount(shiftIndex: number, dayIndex: number) {
     return getRosterCell(shiftIndex, dayIndex).filter((cell) => cell !== null && cell !== undefined).length
   }
+
+  // Calculate coverage percentages based on actual assignments
+  function calculateCoverage(): number[] {
+    const grid = buildRosterGrid()
+    const coverage: number[] = []
+
+    for (let dayIdx = 0; dayIdx < 7; dayIdx++) {
+      let totalRequired = 0
+      let totalFilled = 0
+
+      for (let shiftIdx = 0; shiftIdx < shifts.length; shiftIdx++) {
+        totalRequired += shifts[shiftIdx].required
+        totalFilled += grid[shiftIdx][dayIdx].length
+      }
+
+      const percentage = totalRequired > 0 ? Math.round((totalFilled / totalRequired) * 100) : 0
+      coverage.push(percentage)
+    }
+
+    return coverage
+  }
+
+  // Get real coverage data
+  const realCoverageData = assignments.length > 0 ? calculateCoverage() : coverageData
 
   function getSelectedCellData() {
     const shiftIndex = selectedCell.shiftIndex
@@ -428,7 +482,7 @@ export default function SchedulePage() {
             <div className="grid grid-cols-7 gap-2 mb-6">
               {days.map((day, idx) => {
                 const isToday = day.getTime() === today.getTime()
-                const coverage = coverageData[idx]
+                const coverage = realCoverageData[idx]
                 return (
                   <div
                     key={idx}
@@ -482,30 +536,18 @@ export default function SchedulePage() {
                                 isSelected ? 'bg-teal-50 border-2 border-teal-300' : isToday ? 'bg-blue-50' : ''
                               }`}
                             >
-                              <div className="space-y-2">
-                                {cells.map((cell, cellIdx) => (
-                                  <div key={cellIdx}>
-                            cell ? (
-                              <div key={cellIdx} className="flex items-center justify-between">
-                                <div className={`px-2 py-1 rounded text-xs font-medium ${getChipColor(cell[1])}`}>
-                                  {cell[0]}
-                                </div>
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  onClick={() => cancelAssignment(cell[2])}
-                                  className="text-slate-400 hover:text-red-600 p-0 h-auto"
-                                >
-                                  ✕
-                                </Button>
-                              </div>
-                            ) : (
-                              <div key={cellIdx} className={`px-2 py-1 rounded text-xs font-medium ${getChipColor(null)}`}>
-                                + assign
-                              </div>
-                            )
+                              <div className="space-y-1">
+                                {cells.length > 0 ? (
+                                  cells.map((cell, cellIdx) => (
+                                    <div key={cellIdx} className={`px-2 py-1 rounded text-xs font-medium ${getChipColor(cell[1])}`}>
+                                      {cell[0]}
+                                    </div>
+                                  ))
+                                ) : (
+                                  <div className={`px-2 py-1 rounded text-xs font-medium ${getChipColor(null)}`}>
+                                    + assign
                                   </div>
-                                ))}
+                                )}
                               </div>
                             </td>
                           )
