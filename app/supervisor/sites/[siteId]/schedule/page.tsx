@@ -14,15 +14,19 @@ export default function SchedulePage() {
   const params = useParams()
   const siteId = params.siteId as string
 
+  // State for transformed data
   const [selectedCell, setSelectedCell] = useState({ shiftIndex: 1, dayIndex: 2 }) // Wed Afternoon pre-selected
   const [assignmentType, setAssignmentType] = useState('Planned')
   const [searchQuery, setSearchQuery] = useState('')
   const [selectedGuard, setSelectedGuard] = useState<{ id: string; full_name: string; status: string } | null>(null)
-  const [roster, setRoster] = useState<any[][][]>([])
-  const [guardsDirectory, setGuardsDirectory] = useState<any[]>([])
-  const [coverageData, setCoverageData] = useState<number[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [slots, setSlots] = useState<any[]>([])
+  const [shiftDefs, setShiftDefs] = useState<any[]>([])
+  const [assignments, setAssignments] = useState<any[]>([])
+  const [guardNames, setGuardNames] = useState<any[]>([])
+  const [guardsDirectory, setGuardsDirectory] = useState<any[]>([])
+  const [siteUUID, setSiteUUID] = useState<string | null>(null)
 
   const handleSignOut = () => {
     router.push('/')
@@ -55,7 +59,24 @@ export default function SchedulePage() {
     const initializeData = async () => {
       try {
         setLoading(true)
-        await Promise.all([fetchSchedule(), fetchGuards()])
+        // First, resolve the site UUID from site code
+        const { data: site, error: siteError } = await supabase
+          .from('sites')
+          .select('id')
+          .eq('site_code', siteId.toUpperCase())
+          .single()
+
+        if (siteError || !site) {
+          setError('Site not found: ' + siteId)
+          setLoading(false)
+          return
+        }
+
+        console.log('[v0] Site lookup:', { siteCode: siteId, siteUUID: site.id })
+        setSiteUUID(site.id)
+
+        // Now fetch all data using the site UUID
+        await Promise.all([fetchSchedule(site.id), fetchGuards()])
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to load schedule')
         console.error('[v0] Error loading schedule:', err)
@@ -67,73 +88,68 @@ export default function SchedulePage() {
     initializeData()
   }, [])
 
-  async function fetchSchedule() {
-    const { data: slots, error: slotsError } = await supabase
-      .from('roster_slots')
-      .select(
-        `
-        id,
-        shift_date,
-        start_time,
-        end_time,
-        shift_definition_id,
-        shift_definitions (
-          shift_name,
-          shift_code,
-          required_headcount
-        ),
-        shift_assignments (
-          id,
-          guard_id,
-          assignment_type,
-          is_cancelled,
-          users (
-            full_name,
-            external_employee_code
-          )
-        )
-      `
-      )
-      .eq('site_id', siteId)
-      .gte('shift_date', weekStart.toISOString().split('T')[0])
-      .lte('shift_date', weekEnd.toISOString().split('T')[0])
-      .order('shift_date')
+  async function fetchSchedule(actualSiteUUID: string) {
+    try {
+      console.log('[v0] fetchSchedule starting with siteUUID:', actualSiteUUID)
 
-    if (slotsError) throw slotsError
+      // Query 1 — get roster slots
+      const { data: slotsData, error: slotsError } = await supabase
+        .from('roster_slots')
+        .select('id, shift_date, start_time, end_time, shift_definition_id, site_id')
+        .eq('site_id', actualSiteUUID)
+        .gte('shift_date', '2026-04-07')
+        .lte('shift_date', '2026-04-13')
 
-    // Transform slots into grid structure
-    const rosterGrid = [
-      Array(7).fill(null).map(() => []),
-      Array(7).fill(null).map(() => []),
-      Array(7).fill(null).map(() => []),
-    ]
-
-    slots?.forEach((slot: any) => {
-      const shiftDate = new Date(slot.shift_date)
-      const dayIndex = (shiftDate.getDay() + 6) % 7 // Convert Sunday=0 to Monday=0
-      const shiftCode = slot.shift_definitions?.shift_code
-      const shiftIndex = shifts.findIndex(s => s.code === shiftCode)
-
-      if (shiftIndex >= 0 && dayIndex >= 0 && dayIndex < 7) {
-        const assignments = (slot.shift_assignments || []).filter((a: any) => !a.is_cancelled)
-        assignments.forEach((assignment: any) => {
-          rosterGrid[shiftIndex][dayIndex].push([
-            assignment.users?.full_name || 'Unknown',
-            assignment.assignment_type.toLowerCase(),
-            assignment.id,
-          ])
-        })
-
-        // Calculate coverage
-        const required = slot.shift_definitions?.required_headcount || 0
-        const filled = assignments.length
-        if (!coverageData[dayIndex]) coverageData[dayIndex] = 0
-        // Store coverage info (simplified for now)
+      if (slotsError) throw slotsError
+      if (!slotsData || slotsData.length === 0) {
+        console.log('[v0] No slots found for site:', actualSiteUUID)
+        setSlots([])
+        return
       }
-    })
 
-    setRoster(rosterGrid)
-    setCoverageData(Array(7).fill(100)) // Placeholder - calculate actual coverage
+      console.log('[v0] Found slots:', slotsData.length)
+
+      // Query 2 — get shift definitions for this site
+      const { data: shiftDefsData, error: shiftDefsError } = await supabase
+        .from('shift_definitions')
+        .select('id, shift_name, shift_code, required_headcount')
+        .eq('site_id', actualSiteUUID)
+        .eq('is_active', true)
+
+      if (shiftDefsError) throw shiftDefsError
+      console.log('[v0] Found shift definitions:', shiftDefsData?.length || 0)
+
+      // Query 3 — get assignments for these slots
+      const slotIds = slotsData.map(s => s.id)
+      const { data: assignmentsData, error: assignmentsError } = await supabase
+        .from('shift_assignments')
+        .select('id, roster_slot_id, guard_id, assignment_type, is_cancelled')
+        .in('roster_slot_id', slotIds)
+        .eq('is_cancelled', false)
+
+      if (assignmentsError) throw assignmentsError
+      console.log('[v0] Found assignments:', assignmentsData?.length || 0)
+
+      // Query 4 — get guard names
+      const guardIds = [...new Set(assignmentsData?.map(a => a.guard_id) || [])]
+      const { data: guardsData } = guardIds.length > 0
+        ? await supabase
+            .from('users')
+            .select('id, full_name, external_employee_code')
+            .in('id', guardIds)
+        : { data: [] }
+
+      console.log('[v0] Found guards:', guardsData?.length || 0)
+
+      // Update state with separate data
+      setSlots(slotsData)
+      setShiftDefs(shiftDefsData || [])
+      setAssignments(assignmentsData || [])
+      setGuardNames(guardsData || [])
+    } catch (err) {
+      console.error('[v0] fetchSchedule error:', err)
+      throw err
+    }
   }
 
   async function fetchGuards() {
@@ -152,14 +168,15 @@ export default function SchedulePage() {
     }))
 
     setGuardsDirectory(guardsList)
+    setGuardNames(guardsList)
   }
 
   async function saveAssignment() {
-    if (!selectedGuard) return
+    if (!selectedGuard || !siteUUID) return
 
     try {
       const cellData = getSelectedCellData()
-      const slot = await getSlotForCell(cellData.shiftIndex, cellData.dayIndex)
+      const slot = await getSlotForCell(cellData.shiftIndex, cellData.dayIndex, siteUUID)
 
       if (!slot) {
         alert('Could not find slot for this assignment')
@@ -168,7 +185,7 @@ export default function SchedulePage() {
 
       const { error } = await supabase.from('shift_assignments').insert({
         roster_slot_id: slot.id,
-        site_id: siteId,
+        site_id: siteUUID,
         guard_id: selectedGuard.id,
         start_time: slot.start_time,
         end_time: slot.end_time,
@@ -184,7 +201,7 @@ export default function SchedulePage() {
 
       setSelectedGuard(null)
       setSearchQuery('')
-      await fetchSchedule()
+      await fetchSchedule(siteUUID)
     } catch (err) {
       console.error('[v0] Error saving assignment:', err)
       alert('Failed to save assignment')
@@ -199,27 +216,29 @@ export default function SchedulePage() {
         .eq('id', assignmentId)
 
       if (error) throw error
-      await fetchSchedule()
+      if (siteUUID) {
+        await fetchSchedule(siteUUID)
+      }
     } catch (err) {
       console.error('[v0] Error cancelling assignment:', err)
       alert('Failed to cancel assignment')
     }
   }
 
-  async function getSlotForCell(shiftIndex: number, dayIndex: number) {
+  async function getSlotForCell(shiftIndex: number, dayIndex: number, actualSiteUUID: string) {
     const shiftCode = shifts[shiftIndex]?.code
     const slotDate = days[dayIndex]
     const dateStr = slotDate.toISOString().split('T')[0]
 
-    const { data: slots } = await supabase
+    const { data: foundSlots } = await supabase
       .from('roster_slots')
       .select('id, start_time, end_time')
-      .eq('site_id', siteId)
+      .eq('site_id', actualSiteUUID)
       .eq('shift_date', dateStr)
       .order('start_time')
       .limit(1)
 
-    return slots?.[0]
+    return foundSlots?.[0]
   }
 
   function parseTriggerError(message: string): string {
@@ -230,29 +249,56 @@ export default function SchedulePage() {
     return message
   }
 
-  const getCoverageColor = (percentage: number) => {
-    if (percentage >= 80) return 'bg-green-100 text-green-700'
-    if (percentage >= 50) return 'bg-amber-100 text-amber-700'
-    return 'bg-red-100 text-red-700'
+  function buildRosterGrid() {
+    // Initialize grid: 3 shifts × 7 days
+    const grid = [
+      Array(7).fill(null).map(() => []),
+      Array(7).fill(null).map(() => []),
+      Array(7).fill(null).map(() => []),
+    ]
+
+    // Build lookup maps
+    const slotMap = new Map(slots.map(s => [s.id, s]))
+    const shiftDefMap = new Map(shiftDefs.map(s => [s.id, s]))
+    const guardMap = new Map(guardNames.map(g => [g.id, g]))
+
+    // Place assignments in grid
+    assignments.forEach((assignment: any) => {
+      const slot = slotMap.get(assignment.roster_slot_id)
+      if (!slot) return
+
+      const shiftDef = shiftDefMap.get(slot.shift_definition_id)
+      if (!shiftDef) return
+
+      const guard = guardMap.get(assignment.guard_id)
+      if (!guard) return
+
+      const shiftDate = new Date(slot.shift_date)
+      const dayIndex = (shiftDate.getDay() + 6) % 7 // Convert Sunday=0 to Monday=0
+      const shiftIndex = shifts.findIndex(s => s.code === shiftDef.shift_code)
+
+      if (shiftIndex >= 0 && dayIndex >= 0 && dayIndex < 7) {
+        grid[shiftIndex][dayIndex].push([
+          guard.full_name,
+          assignment.assignment_type.toLowerCase(),
+          assignment.id,
+        ])
+      }
+    })
+
+    return grid
   }
 
-  const getChipColor = (status: string | null) => {
-    if (status === 'planned') return 'bg-green-100 text-green-700 border-0'
-    if (status === 'replacement') return 'bg-amber-100 text-amber-700 border-0'
-    if (status === 'adhoc') return 'bg-purple-100 text-purple-700 border-0'
-    if (status === 'absent') return 'bg-red-100 text-red-700 border-0 line-through'
-    return 'border-2 border-dashed border-slate-300 text-slate-500'
+  function getRosterCell(shiftIndex: number, dayIndex: number) {
+    const grid = buildRosterGrid()
+    return grid?.[shiftIndex]?.[dayIndex] || []
   }
 
-  const getRosterCell = (shiftIndex: number, dayIndex: number) => {
-    return roster?.[shiftIndex]?.[dayIndex] || []
-  }
-
-  const getAssignedCount = (shiftIndex: number, dayIndex: number) => {
+  function getAssignedCount(shiftIndex: number, dayIndex: number) {
     return getRosterCell(shiftIndex, dayIndex).filter((cell) => cell !== null && cell !== undefined).length
   }
 
-  const getSelectedCellData = () => {
+  function getSelectedCellData() {
     const shiftIndex = selectedCell.shiftIndex
     const dayIndex = selectedCell.dayIndex
     const required = shifts[shiftIndex].required
