@@ -73,6 +73,28 @@ export default function ManagerReportsPage() {
     { code: 'CYBJ03', supervisor: 'Rajesh Kumar', total: 56, filled: 34, gap: 22, rate: '60%' },
   ]
 
+  const leaveStats = [
+    { label: 'Total leave days', value: 156, color: 'blue' },
+    { label: 'AL days', value: 98, color: 'purple' },
+    { label: 'MC days', value: 42, color: 'red' },
+    { label: 'EL/UL days', value: 16, color: 'amber' },
+  ]
+
+  const leaveByType = [
+    { type: 'Annual Leave (AL)', percentage: 63, color: 'purple' },
+    { type: 'Medical Leave (MC)', percentage: 27, color: 'red' },
+    { type: 'Emergency Leave (EL)', percentage: 7, color: 'amber' },
+    { type: 'Unpaid Leave (UL)', percentage: 3, color: 'slate' },
+  ]
+
+  const leaveUsageByGuard = [
+    { name: 'Ahmad Razif', al: 8, mc: 2, el: 1, total: 11 },
+    { name: 'Siti Norizan', al: 6, mc: 1, el: 0, total: 7 },
+    { name: 'Rajan Muthu', al: 4, mc: 3, el: 2, total: 9 },
+    { name: 'Kamal Aizuddin', al: 5, mc: 4, el: 0, total: 9 },
+    { name: 'Nora Baharom', al: 10, mc: 2, el: 1, total: 13 },
+  ]
+
   return (
     <>
       {/* Top Navigation */}
@@ -376,7 +398,88 @@ export default function ManagerReportsPage() {
             </div>
           )}
           {activeTab === 'leave' && (
-            <p className="text-slate-600">Leave content</p>
+            <div className="space-y-6">
+              {/* Summary Cards */}
+              <div className="grid grid-cols-4 gap-4">
+                {leaveStats.map((stat) => (
+                  <Card key={stat.label} className="border-slate-200 p-4">
+                    <p className="text-xs text-slate-600 mb-2">{stat.label}</p>
+                    <p
+                      className={`text-3xl font-bold ${
+                        stat.color === 'blue'
+                          ? 'text-blue-600'
+                          : stat.color === 'purple'
+                            ? 'text-purple-600'
+                            : stat.color === 'red'
+                              ? 'text-red-600'
+                              : 'text-amber-600'
+                      }`}
+                    >
+                      {stat.value}
+                    </p>
+                  </Card>
+                ))}
+              </div>
+
+              {/* Leave by Type Chart */}
+              <Card className="border-slate-200 p-6">
+                <h3 className="font-semibold text-slate-900 mb-6">Leave by type</h3>
+                <div className="space-y-4">
+                  {leaveByType.map((leave) => (
+                    <div key={leave.type} className="flex items-center gap-4">
+                      <div className="w-40 text-sm font-medium text-slate-700">{leave.type}</div>
+                      <div className="flex-1 flex items-center gap-2">
+                        <div className="flex-1 h-8 bg-slate-100 rounded flex items-center overflow-hidden">
+                          <div
+                            className={`h-full flex items-center justify-end pr-2 ${
+                              leave.color === 'purple'
+                                ? 'bg-purple-600'
+                                : leave.color === 'red'
+                                  ? 'bg-red-600'
+                                  : leave.color === 'amber'
+                                    ? 'bg-amber-600'
+                                    : 'bg-slate-400'
+                            }`}
+                            style={{ width: `${leave.percentage}%` }}
+                          >
+                            <span className="text-xs font-bold text-white">{leave.percentage}%</span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </Card>
+
+              {/* Leave Usage by Guard Table */}
+              <Card className="border-slate-200 overflow-hidden">
+                <div className="p-6 border-b border-slate-200">
+                  <h3 className="font-semibold text-slate-900">Leave usage by guard</h3>
+                </div>
+                <table className="w-full">
+                  <thead className="bg-slate-50">
+                    <tr className="border-b border-slate-200">
+                      <th className="px-6 py-3 text-left text-xs font-semibold text-slate-700">Guard</th>
+                      <th className="px-6 py-3 text-left text-xs font-semibold text-slate-700">AL used</th>
+                      <th className="px-6 py-3 text-left text-xs font-semibold text-slate-700">MC used</th>
+                      <th className="px-6 py-3 text-left text-xs font-semibold text-slate-700">EL used</th>
+                      <th className="px-6 py-3 text-left text-xs font-semibold text-slate-700">Total days</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {leaveUsageByGuard.map((guard) => (
+                      <tr key={guard.name} className="border-b border-slate-200 hover:bg-slate-50">
+                        <td className="px-6 py-3 text-sm font-medium text-slate-900">{guard.name}</td>
+                        <td className="px-6 py-3 text-sm text-slate-700">{guard.al}</td>
+                        <td className="px-6 py-3 text-sm text-slate-700">{guard.mc}</td>
+                        <td className="px-6 py-3 text-sm text-slate-700">{guard.el}</td>
+                        <td className="px-6 py-3 text-sm font-semibold text-slate-900">{guard.total}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </Card>
+            </div>
           )}
         </div>
       </div>
