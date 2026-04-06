@@ -18,6 +18,7 @@ export default function SchedulePage() {
   const [selectedCell, setSelectedCell] = useState({ shiftIndex: 1, dayIndex: 2 }) // Wed Afternoon pre-selected
   const [selectedSlot, setSelectedSlot] = useState<any | null>(null)
   const [assignmentType, setAssignmentType] = useState('Planned')
+  const [adhocReason, setAdhocReason] = useState('')
   const [searchQuery, setSearchQuery] = useState('')
   const [selectedGuard, setSelectedGuard] = useState<{ id: string; full_name: string; status: string } | null>(null)
   const [loading, setLoading] = useState(true)
@@ -155,16 +156,10 @@ export default function SchedulePage() {
 
       // Debug: Log full data structures
       console.log('[v0] ========== FETCH COMPLETE ==========')
-      console.log('[v0] Fetched slots:', JSON.stringify(slotsData?.map(s => ({
-        id: s.id,
-        shift_date: s.shift_date,
-        start_time: s.start_time,
-        end_time: s.end_time
-      }))))
-      console.log('[v0] Shift defs:', JSON.stringify(shiftDefsData, null, 2))
-      console.log('[v0] Assignments count:', assignmentsData?.length)
-      console.log('[v0] Assignments (sample):', JSON.stringify(assignmentsData?.slice(0, 3), null, 2))
-      console.log('[v0] Guards:', JSON.stringify(guardsData, null, 2))
+      console.log('[v0] Slots count:', slotsData.length)
+      console.log('[v0] Shift defs:', shiftDefsData?.map(s => `${s.shift_code}: required=${s.required_headcount}`))
+      console.log('[v0] Assignments:', assignmentsData?.map(a => `guard=${a.guard_id.slice(0,8)} type=${a.assignment_type}`))
+      console.log('[v0] Guards:', guardsData?.map(g => g.full_name))
       console.log('[v0] =====================================')
     } catch (err) {
       console.error('[v0] fetchSchedule error:', err)
@@ -218,13 +213,20 @@ export default function SchedulePage() {
       }
       const dbAssignmentType = typeMap[assignmentType] || 'planned'
 
+      // Validate ad-hoc requires a reason
+      if (dbAssignmentType === 'adhoc' && !adhocReason.trim()) {
+        alert('Ad-hoc assignments require a reason')
+        return
+      }
+
       console.log('[v0] Saving assignment:', {
         roster_slot_id: fullSlot.id,
         site_id: siteUUID,
         guard_id: selectedGuard.id,
         start_time: fullSlot.start_time,
         end_time: fullSlot.end_time,
-        assignment_type: dbAssignmentType
+        assignment_type: dbAssignmentType,
+        reason: dbAssignmentType === 'adhoc' ? adhocReason.trim() : null
       })
 
       const { error } = await supabase.from('shift_assignments').insert({
@@ -234,7 +236,7 @@ export default function SchedulePage() {
         start_time: fullSlot.start_time,
         end_time: fullSlot.end_time,
         assignment_type: dbAssignmentType,
-        reason: null,
+        reason: dbAssignmentType === 'adhoc' ? adhocReason.trim() : null,
         is_cancelled: false,
       })
 
@@ -246,6 +248,7 @@ export default function SchedulePage() {
 
       setSelectedGuard(null)
       setSearchQuery('')
+      setAdhocReason('')
       await fetchSchedule(siteUUID)
     } catch (err) {
       console.error('[v0] Error saving assignment:', err)
@@ -342,11 +345,11 @@ export default function SchedulePage() {
 
       console.log('[v0] Placing:', {
         guard: guard.full_name,
+        type: assignment.assignment_type,
         dbShiftCode: shiftDef.shift_code,
-        matchedShiftIndex: shiftIndex,
+        shiftIndex,
         dayIndex,
         dayName: dayNames[dayIndex],
-        date: slot.shift_date,
       })
 
       if (shiftIndex >= 0 && dayIndex >= 0 && dayIndex < 7) {
@@ -378,6 +381,17 @@ export default function SchedulePage() {
 
   function getAssignedCount(shiftIndex: number, dayIndex: number) {
     return getRosterCell(shiftIndex, dayIndex).filter((cell) => cell !== null && cell !== undefined).length
+  }
+
+  function getRequiredHeadcount(shiftIndex: number): number {
+    // Try to get from database shift definitions first
+    const targetShiftCode = shifts[shiftIndex]?.code
+    const dbShiftDef = shiftDefs.find(sd => sd.shift_code?.startsWith(targetShiftCode))
+    if (dbShiftDef?.required_headcount) {
+      return dbShiftDef.required_headcount
+    }
+    // Fallback to hardcoded value
+    return shifts[shiftIndex]?.required || 2
   }
 
   // Calculate coverage percentages based on actual assignments
@@ -589,17 +603,23 @@ export default function SchedulePage() {
                               }`}
                             >
                               <div className="space-y-1">
-                                {cells.length > 0 ? (
-                                  cells.map((cell, cellIdx) => (
-                                    <div key={cellIdx} className={`px-2 py-1 rounded text-xs font-medium ${getChipColor(cell[1])}`}>
-                                      {cell[0]}
+                                {/* Show assigned guard chips */}
+                                {cells.map((cell, cellIdx) => (
+                                  <div key={cellIdx} className={`px-2 py-1 rounded text-xs font-medium ${getChipColor(cell[1])}`}>
+                                    {cell[0]}
+                                  </div>
+                                ))}
+                                {/* Show "+ assign" chips for unfilled slots */}
+                                {(() => {
+                                  const required = getRequiredHeadcount(shiftIdx)
+                                  const filled = cells.length
+                                  const unfilled = Math.max(0, required - filled)
+                                  return Array.from({ length: unfilled }).map((_, idx) => (
+                                    <div key={`empty-${idx}`} className={`px-2 py-1 rounded text-xs font-medium ${getChipColor(null)}`}>
+                                      + assign
                                     </div>
                                   ))
-                                ) : (
-                                  <div className={`px-2 py-1 rounded text-xs font-medium ${getChipColor(null)}`}>
-                                    + assign
-                                  </div>
-                                )}
+                                })()}
                               </div>
                             </td>
                           )
@@ -708,10 +728,21 @@ export default function SchedulePage() {
                           >
                             {type}
                           </button>
-                        ))}
-                      </div>
+  ))}
+  </div>
 
-                      {/* Search Input */}
+  {/* Ad-hoc Reason Input */}
+  {assignmentType === 'Ad-hoc' && (
+    <Input
+      type="text"
+      placeholder="Reason for ad-hoc assignment (required)"
+      value={adhocReason}
+      onChange={(e) => setAdhocReason(e.target.value)}
+      className="mb-4 text-sm"
+    />
+  )}
+  
+  {/* Search Input */}
                       <Input
                         type="text"
                         placeholder="Search guards..."
