@@ -27,6 +27,7 @@ export default function SchedulePage() {
   const [guardNames, setGuardNames] = useState<any[]>([])
   const [guardsDirectory, setGuardsDirectory] = useState<any[]>([])
   const [siteUUID, setSiteUUID] = useState<string | null>(null)
+  const [coverageData, setCoverageData] = useState<number[]>([100, 100, 100, 100, 100, 100, 100])
 
   const handleSignOut = () => {
     router.push('/')
@@ -319,6 +320,20 @@ export default function SchedulePage() {
   const filteredGuards = guardsDirectory.filter((g) =>
     g.full_name.toLowerCase().includes(searchQuery.toLowerCase())
   )
+
+  function getCoverageColor(percentage: number) {
+    if (percentage >= 80) return 'text-green-600'
+    if (percentage >= 50) return 'text-amber-600'
+    return 'text-red-600'
+  }
+
+  function getChipColor(status: string | null) {
+    if (status === 'planned') return 'bg-green-100 text-green-700 border-0'
+    if (status === 'replacement') return 'bg-amber-100 text-amber-700 border-0'
+    if (status === 'adhoc') return 'bg-purple-100 text-purple-700 border-0'
+    if (status === 'absent') return 'bg-red-100 text-red-700 border-0 line-through'
+    return 'border-2 border-dashed border-slate-300 text-slate-500'
+  }
 
   const dateStr = today.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: '2-digit', year: 'numeric' })
 
