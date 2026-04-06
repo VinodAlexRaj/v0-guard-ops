@@ -270,14 +270,16 @@ export default function SchedulePage() {
     }
   }
 
-  async function getSlotForCell(shiftIndex: number, dayIndex: number) {
-    const slot = slots.find(s => {
+  function getSlotForCell(shiftIndex: number, dayIndex: number) {
+    const targetShiftCode = shifts[shiftIndex]?.code
+    const slot = slotsRef.current.find(s => {
       const slotDate = new Date(s.shift_date)
       const dayIndex_slot = (slotDate.getDay() + 6) % 7
       const shiftDef = shiftDefs.find(sd => sd.id === s.shift_definition_id)
-      const shiftCode = shifts[shiftIndex]?.code
-      return dayIndex_slot === dayIndex && shiftDef?.shift_code === shiftCode
+      // Match using startsWith since DB has 'MRN-01' and we have 'MRN'
+      return dayIndex_slot === dayIndex && shiftDef?.shift_code?.startsWith(targetShiftCode)
     })
+    console.log('[v0] getSlotForCell:', { shiftIndex, dayIndex, targetShiftCode, foundSlotId: slot?.id })
     return slot || null
   }
 
@@ -333,16 +335,18 @@ export default function SchedulePage() {
 
       const shiftDate = new Date(slot.shift_date)
       const dayIndex = (shiftDate.getDay() + 6) % 7 // Convert Sunday=0 to Monday=0
-      const shiftIndex = shifts.findIndex(s => s.code === shiftDef.shift_code)
+      
+      // Match shift by checking if the database shift_code starts with our prefix
+      // DB has 'MRN-01', we have 'MRN' - use startsWith for matching
+      const shiftIndex = shifts.findIndex(s => shiftDef.shift_code.startsWith(s.code))
 
-      console.log('[v0] ✅ Placing:', {
+      console.log('[v0] Placing:', {
         guard: guard.full_name,
-        shiftCode: shiftDef.shift_code,
-        shiftIndex,
+        dbShiftCode: shiftDef.shift_code,
+        matchedShiftIndex: shiftIndex,
         dayIndex,
         dayName: dayNames[dayIndex],
         date: slot.shift_date,
-        type: assignment.assignment_type,
       })
 
       if (shiftIndex >= 0 && dayIndex >= 0 && dayIndex < 7) {
