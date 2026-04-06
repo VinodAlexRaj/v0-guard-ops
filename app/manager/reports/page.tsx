@@ -67,6 +67,7 @@ export default function ManagerReportsPage() {
     { name: 'Nora Baharom', onTime: 12, late: 1, absent: 0, otHours: '0 hrs', rate: 92 },
   ]
 
+  // Sites with coverage gaps data
   const sitesWithGaps = [
     { code: 'KLBNG07', supervisor: 'Rajesh Kumar', total: 84, filled: 35, gap: 49, rate: '41%' },
     { code: 'KLSNT01', supervisor: 'Azri Hamdan', total: 84, filled: 28, gap: 56, rate: '33%' },
