@@ -183,9 +183,17 @@ export default function SchedulePage() {
   }
 
   async function saveAssignment() {
-    if (!selectedSlot || !selectedGuard) return
+    if (!selectedSlot || !selectedGuard || !siteUUID) return
 
     try {
+      // Find the full slot data from the slots array using selectedSlot.id
+      const fullSlot = slots.find(s => s.id === selectedSlot.id)
+
+      if (!fullSlot) {
+        alert('Could not find slot data')
+        return
+      }
+
       // Map UI display values to exact database enum values
       const typeMap: Record<string, string> = {
         'Planned': 'planned',
@@ -194,27 +202,35 @@ export default function SchedulePage() {
       }
       const dbAssignmentType = typeMap[assignmentType] || 'planned'
 
-      const { error } = await supabase.from('shift_assignments').insert({
-        roster_slot_id: selectedSlot.id,
-        site_id: selectedSlot.site_id,
+      console.log('[v0] Saving assignment:', {
+        roster_slot_id: fullSlot.id,
+        site_id: siteUUID,
         guard_id: selectedGuard.id,
-        start_time: selectedSlot.start_time,
-        end_time: selectedSlot.end_time,
+        start_time: fullSlot.start_time,
+        end_time: fullSlot.end_time,
+        assignment_type: dbAssignmentType
+      })
+
+      const { error } = await supabase.from('shift_assignments').insert({
+        roster_slot_id: fullSlot.id,
+        site_id: siteUUID,
+        guard_id: selectedGuard.id,
+        start_time: fullSlot.start_time,
+        end_time: fullSlot.end_time,
         assignment_type: dbAssignmentType,
         reason: null,
         is_cancelled: false,
       })
 
       if (error) {
+        console.error('[v0] Save error:', error)
         alert(parseTriggerError(error.message))
         return
       }
 
       setSelectedGuard(null)
       setSearchQuery('')
-      if (siteUUID) {
-        await fetchSchedule(siteUUID)
-      }
+      await fetchSchedule(siteUUID)
     } catch (err) {
       console.error('[v0] Error saving assignment:', err)
       alert('Failed to save assignment')
