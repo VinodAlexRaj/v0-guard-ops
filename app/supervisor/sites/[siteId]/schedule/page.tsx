@@ -394,6 +394,15 @@ export default function SchedulePage() {
     return shifts[shiftIndex]?.required || 2
   }
 
+  function getRequiredHeadcountForSlot(slotId: string): number {
+    // Get required headcount for a specific slot by looking up its shift definition
+    const slot = slotsRef.current.find(s => s.id === slotId)
+    if (!slot) return 2
+    
+    const shiftDef = shiftDefs.find(sd => sd.id === slot.shift_definition_id)
+    return shiftDef?.required_headcount || 2
+  }
+
   // Calculate coverage percentages based on actual assignments
   function calculateCoverage(): number[] {
     const grid = buildRosterGrid()
@@ -421,7 +430,8 @@ export default function SchedulePage() {
   function getSelectedCellData() {
     const shiftIndex = selectedCell.shiftIndex
     const dayIndex = selectedCell.dayIndex
-    const required = shifts[shiftIndex].required
+    // Get required from the actual slot if available, otherwise use hardcoded
+    const required = selectedSlot ? getRequiredHeadcountForSlot(selectedSlot.id) : shifts[shiftIndex].required
     const filled = getAssignedCount(shiftIndex, dayIndex)
     const date = days[dayIndex]
     const dateStr = date.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: '2-digit' })
@@ -584,18 +594,26 @@ export default function SchedulePage() {
                         {days.map((day, dayIdx) => {
                           const isToday = day.getTime() === today.getTime()
                           const isSelected = selectedCell.shiftIndex === shiftIdx && selectedCell.dayIndex === dayIdx
+                          
+                          // Find the slot for this shift/day
+                          const targetShiftCode = shifts[shiftIdx]?.code
+                          const dayStr = day.toISOString().split('T')[0]
+                          const slot = slotsRef.current.find(s => {
+                            const slotDate = new Date(s.shift_date).toISOString().split('T')[0]
+                            const shiftDef = shiftDefs.find(sd => sd.id === s.shift_definition_id)
+                            return slotDate === dayStr && shiftDef?.shift_code?.startsWith(targetShiftCode)
+                          })
+                          
                           const cells = getRosterCell(shiftIdx, dayIdx)
+                          const required = slot ? getRequiredHeadcountForSlot(slot.id) : getRequiredHeadcount(shiftIdx)
+                          const filled = cells.length
+                          const unfilled = Math.max(0, required - filled)
+                          
                           return (
                             <td
                               key={dayIdx}
                               onClick={() => {
                                 setSelectedCell({ shiftIndex: shiftIdx, dayIndex: dayIdx })
-                                // Find and set the slot for this cell
-                                const slot = getSlotForCell(shiftIdx, dayIdx)
-                                console.log('[v0] Cell clicked:', {
-                                  shift_date: slot?.shift_date,
-                                  slot_id: slot?.id
-                                })
                                 setSelectedSlot(slot)
                               }}
                               className={`px-4 py-3 text-center cursor-pointer transition ${
@@ -610,16 +628,11 @@ export default function SchedulePage() {
                                   </div>
                                 ))}
                                 {/* Show "+ assign" chips for unfilled slots */}
-                                {(() => {
-                                  const required = getRequiredHeadcount(shiftIdx)
-                                  const filled = cells.length
-                                  const unfilled = Math.max(0, required - filled)
-                                  return Array.from({ length: unfilled }).map((_, idx) => (
-                                    <div key={`empty-${idx}`} className={`px-2 py-1 rounded text-xs font-medium ${getChipColor(null)}`}>
-                                      + assign
-                                    </div>
-                                  ))
-                                })()}
+                                {Array.from({ length: unfilled }).map((_, idx) => (
+                                  <div key={`empty-${idx}`} className={`px-2 py-1 rounded text-xs font-medium ${getChipColor(null)}`}>
+                                    + assign
+                                  </div>
+                                ))}
                               </div>
                             </td>
                           )
