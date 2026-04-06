@@ -16,6 +16,7 @@ export default function SchedulePage() {
 
   // State for transformed data
   const [selectedCell, setSelectedCell] = useState({ shiftIndex: 1, dayIndex: 2 }) // Wed Afternoon pre-selected
+  const [selectedSlot, setSelectedSlot] = useState<any | null>(null)
   const [assignmentType, setAssignmentType] = useState('Planned')
   const [searchQuery, setSearchQuery] = useState('')
   const [selectedGuard, setSelectedGuard] = useState<{ id: string; full_name: string; status: string } | null>(null)
@@ -149,10 +150,13 @@ export default function SchedulePage() {
       setGuardNames(guardsData || [])
 
       // Debug: Log full data structures
-      console.log('[v0] Slots data:', JSON.stringify(slotsData?.slice(0, 3), null, 2))
-      console.log('[v0] Shift definitions:', JSON.stringify(shiftDefsData, null, 2))
-      console.log('[v0] Assignments data:', JSON.stringify(assignmentsData, null, 2))
-      console.log('[v0] Guards data:', JSON.stringify(guardsData, null, 2))
+      console.log('[v0] ========== FETCH COMPLETE ==========')
+      console.log('[v0] Slots (sample):', JSON.stringify(slotsData?.slice(0, 2), null, 2))
+      console.log('[v0] Shift defs:', JSON.stringify(shiftDefsData, null, 2))
+      console.log('[v0] Assignments count:', assignmentsData?.length)
+      console.log('[v0] Assignments (sample):', JSON.stringify(assignmentsData?.slice(0, 3), null, 2))
+      console.log('[v0] Guards:', JSON.stringify(guardsData, null, 2))
+      console.log('[v0] =====================================')
     } catch (err) {
       console.error('[v0] fetchSchedule error:', err)
       throw err
@@ -179,17 +183,9 @@ export default function SchedulePage() {
   }
 
   async function saveAssignment() {
-    if (!selectedGuard || !siteUUID) return
+    if (!selectedSlot || !selectedGuard) return
 
     try {
-      const cellData = getSelectedCellData()
-      const slot = await getSlotForCell(cellData.shiftIndex, cellData.dayIndex, siteUUID)
-
-      if (!slot) {
-        alert('Could not find slot for this assignment')
-        return
-      }
-
       // Map UI display values to exact database enum values
       const typeMap: Record<string, string> = {
         'Planned': 'planned',
@@ -199,11 +195,11 @@ export default function SchedulePage() {
       const dbAssignmentType = typeMap[assignmentType] || 'planned'
 
       const { error } = await supabase.from('shift_assignments').insert({
-        roster_slot_id: slot.id,
-        site_id: siteUUID,
+        roster_slot_id: selectedSlot.id,
+        site_id: selectedSlot.site_id,
         guard_id: selectedGuard.id,
-        start_time: slot.start_time,
-        end_time: slot.end_time,
+        start_time: selectedSlot.start_time,
+        end_time: selectedSlot.end_time,
         assignment_type: dbAssignmentType,
         reason: null,
         is_cancelled: false,
@@ -216,7 +212,9 @@ export default function SchedulePage() {
 
       setSelectedGuard(null)
       setSearchQuery('')
-      await fetchSchedule(siteUUID)
+      if (siteUUID) {
+        await fetchSchedule(siteUUID)
+      }
     } catch (err) {
       console.error('[v0] Error saving assignment:', err)
       alert('Failed to save assignment')
@@ -240,20 +238,15 @@ export default function SchedulePage() {
     }
   }
 
-  async function getSlotForCell(shiftIndex: number, dayIndex: number, actualSiteUUID: string) {
-    const shiftCode = shifts[shiftIndex]?.code
-    const slotDate = days[dayIndex]
-    const dateStr = slotDate.toISOString().split('T')[0]
-
-    const { data: foundSlots } = await supabase
-      .from('roster_slots')
-      .select('id, start_time, end_time')
-      .eq('site_id', actualSiteUUID)
-      .eq('shift_date', dateStr)
-      .order('start_time')
-      .limit(1)
-
-    return foundSlots?.[0]
+  async function getSlotForCell(shiftIndex: number, dayIndex: number) {
+    const slot = slots.find(s => {
+      const slotDate = new Date(s.shift_date)
+      const dayIndex_slot = (slotDate.getDay() + 6) % 7
+      const shiftDef = shiftDefs.find(sd => sd.id === s.shift_definition_id)
+      const shiftCode = shifts[shiftIndex]?.code
+      return dayIndex_slot === dayIndex && shiftDef?.shift_code === shiftCode
+    })
+    return slot || null
   }
 
   function parseTriggerError(message: string): string {
@@ -282,25 +275,27 @@ export default function SchedulePage() {
       shiftDefsCount: shiftDefs.length,
       assignmentsCount: assignments.length,
       guardNamesCount: guardNames.length,
+      slotSample: slots.slice(0, 2),
+      shiftDefsSample: shiftDefs,
     })
 
     // Place assignments in grid
     assignments.forEach((assignment: any) => {
       const slot = slotMap.get(assignment.roster_slot_id)
       if (!slot) {
-        console.log('[v0] No slot found for assignment:', assignment.roster_slot_id)
+        console.log('[v0] ❌ No slot found for assignment:', assignment.roster_slot_id)
         return
       }
 
       const shiftDef = shiftDefMap.get(slot.shift_definition_id)
       if (!shiftDef) {
-        console.log('[v0] No shiftDef found for slot:', slot.shift_definition_id)
+        console.log('[v0] ❌ No shiftDef found for slot:', slot.shift_definition_id)
         return
       }
 
       const guard = guardMap.get(assignment.guard_id)
       if (!guard) {
-        console.log('[v0] No guard found for assignment:', assignment.guard_id)
+        console.log('[v0] ❌ No guard found for assignment:', assignment.guard_id)
         return
       }
 
@@ -308,12 +303,14 @@ export default function SchedulePage() {
       const dayIndex = (shiftDate.getDay() + 6) % 7 // Convert Sunday=0 to Monday=0
       const shiftIndex = shifts.findIndex(s => s.code === shiftDef.shift_code)
 
-      console.log('[v0] Placing assignment:', {
+      console.log('[v0] ✅ Placing:', {
         guard: guard.full_name,
         shiftCode: shiftDef.shift_code,
         shiftIndex,
         dayIndex,
+        dayName: dayNames[dayIndex],
         date: slot.shift_date,
+        type: assignment.assignment_type,
       })
 
       if (shiftIndex >= 0 && dayIndex >= 0 && dayIndex < 7) {
@@ -322,6 +319,16 @@ export default function SchedulePage() {
           assignment.assignment_type.toLowerCase(),
           assignment.id,
         ])
+      }
+    })
+
+    // Log final grid state
+    console.log('[v0] Grid built. Summary:')
+    shifts.forEach((shift, shiftIdx) => {
+      for (let dayIdx = 0; dayIdx < 7; dayIdx++) {
+        if (grid[shiftIdx][dayIdx].length > 0) {
+          console.log(`[v0]   ${shift.name} ${dayNames[dayIdx]}: ${grid[shiftIdx][dayIdx].map(c => c[0]).join(', ')}`)
+        }
       }
     })
 
@@ -531,7 +538,12 @@ export default function SchedulePage() {
                           return (
                             <td
                               key={dayIdx}
-                              onClick={() => setSelectedCell({ shiftIndex: shiftIdx, dayIndex: dayIdx })}
+                              onClick={() => {
+                                setSelectedCell({ shiftIndex: shiftIdx, dayIndex: dayIdx })
+                                // Find and set the slot for this cell
+                                const slot = getSlotForCell(shiftIdx, dayIdx)
+                                setSelectedSlot(slot)
+                              }}
                               className={`px-4 py-3 text-center cursor-pointer transition ${
                                 isSelected ? 'bg-teal-50 border-2 border-teal-300' : isToday ? 'bg-blue-50' : ''
                               }`}
