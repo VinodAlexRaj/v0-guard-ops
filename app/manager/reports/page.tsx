@@ -4,11 +4,14 @@ import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { LogOut } from 'lucide-react'
+import { Card } from '@/components/ui/card'
+import { LogOut, Download } from 'lucide-react'
 
 export default function ManagerReportsPage() {
   const router = useRouter()
   const [activeTab, setActiveTab] = useState<'coverage' | 'attendance' | 'leave'>('coverage')
+  const [activePeriod, setActivePeriod] = useState('This week')
+  const [activeSupervisor, setActiveSupervisor] = useState('All')
 
   const todayDate = new Date(2026, 3, 10)
   const dateStr = todayDate.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: '2-digit', year: 'numeric' })
@@ -16,6 +19,23 @@ export default function ManagerReportsPage() {
   const handleSignOut = () => {
     router.push('/')
   }
+
+  const handleExportCSV = () => {
+    alert('Export coming soon')
+  }
+
+  const supervisors = [
+    { name: 'Azri Hamdan', rate: 83, status: 'amber' },
+    { name: 'Farah Izzati', rate: 90, status: 'green' },
+    { name: 'Rajesh Kumar', rate: 76, status: 'red' },
+    { name: 'Tan Wei Ling', rate: 97, status: 'green' },
+  ]
+
+  const sitesWithGaps = [
+    { code: 'KLBNG07', supervisor: 'Rajesh Kumar', total: 84, filled: 35, gap: 49, rate: '41%' },
+    { code: 'KLSNT01', supervisor: 'Azri Hamdan', total: 84, filled: 28, gap: 56, rate: '33%' },
+    { code: 'CYBJ03', supervisor: 'Rajesh Kumar', total: 56, filled: 34, gap: 22, rate: '60%' },
+  ]
 
   return (
     <>
@@ -88,7 +108,154 @@ export default function ManagerReportsPage() {
         {/* Tab Content */}
         <div className="mt-6">
           {activeTab === 'coverage' && (
-            <p className="text-slate-600">Coverage content</p>
+            <div className="space-y-6">
+              {/* Filter Row */}
+              <div className="flex gap-8 items-center">
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-medium text-slate-700">Period:</span>
+                  <div className="flex gap-2">
+                    {['This week', 'This month', 'Last month', 'Custom'].map((period) => (
+                      <button
+                        key={period}
+                        onClick={() => setActivePeriod(period)}
+                        className={`px-3 py-1 rounded text-xs font-medium transition ${
+                          activePeriod === period
+                            ? 'bg-slate-900 text-white'
+                            : 'bg-slate-200 text-slate-700 hover:bg-slate-300'
+                        }`}
+                      >
+                        {period}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-medium text-slate-700">Supervisor:</span>
+                  <div className="flex gap-2">
+                    {['All', 'Azri', 'Farah', 'Rajesh', 'Tan Wei Ling'].map((supervisor) => (
+                      <button
+                        key={supervisor}
+                        onClick={() => setActiveSupervisor(supervisor)}
+                        className={`px-3 py-1 rounded text-xs font-medium transition ${
+                          activeSupervisor === supervisor
+                            ? 'bg-slate-900 text-white'
+                            : 'bg-slate-200 text-slate-700 hover:bg-slate-300'
+                        }`}
+                      >
+                        {supervisor}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="ml-auto">
+                  <Button
+                    onClick={handleExportCSV}
+                    variant="outline"
+                    className="border-slate-300"
+                  >
+                    <Download className="w-4 h-4 mr-2" />
+                    Export CSV
+                  </Button>
+                </div>
+              </div>
+
+              {/* Summary Cards */}
+              <div className="grid grid-cols-4 gap-4">
+                <Card className="border-slate-200 p-4">
+                  <p className="text-xs text-slate-600 mb-2">Avg fill rate</p>
+                  <p className="text-3xl font-bold text-green-600">87%</p>
+                </Card>
+                <Card className="border-slate-200 p-4">
+                  <p className="text-xs text-slate-600 mb-2">Total slots</p>
+                  <p className="text-3xl font-bold text-blue-600">1,680</p>
+                </Card>
+                <Card className="border-slate-200 p-4">
+                  <p className="text-xs text-slate-600 mb-2">Filled slots</p>
+                  <p className="text-3xl font-bold text-green-600">1,462</p>
+                </Card>
+                <Card className="border-slate-200 p-4">
+                  <p className="text-xs text-slate-600 mb-2">Unfilled slots</p>
+                  <p className="text-3xl font-bold text-red-600">218</p>
+                </Card>
+              </div>
+
+              {/* Bar Chart */}
+              <Card className="border-slate-200 p-6">
+                <h3 className="font-semibold text-slate-900 mb-6">Fill rate by supervisor</h3>
+                <div className="space-y-4">
+                  {supervisors.map((supervisor) => (
+                    <div key={supervisor.name} className="flex items-center gap-4">
+                      <div className="w-32 text-sm font-medium text-slate-700">{supervisor.name}</div>
+                      <div className="flex-1 flex items-center gap-2">
+                        <div className="flex-1 h-8 bg-slate-100 rounded flex items-center overflow-hidden">
+                          <div
+                            className={`h-full flex items-center justify-end pr-2 ${
+                              supervisor.status === 'green'
+                                ? 'bg-green-600'
+                                : supervisor.status === 'amber'
+                                  ? 'bg-amber-600'
+                                  : 'bg-red-600'
+                            }`}
+                            style={{ width: `${supervisor.rate}%` }}
+                          >
+                            {supervisor.rate >= 50 && <span className="text-xs font-bold text-white">{supervisor.rate}%</span>}
+                          </div>
+                        </div>
+                        {supervisor.rate < 50 && <span className="text-xs font-bold text-slate-900">{supervisor.rate}%</span>}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </Card>
+
+              {/* Sites with Most Gaps Table */}
+              <Card className="border-slate-200 overflow-hidden">
+                <div className="p-6 border-b border-slate-200">
+                  <h3 className="font-semibold text-slate-900">Sites with most gaps</h3>
+                </div>
+                <table className="w-full">
+                  <thead className="bg-slate-50">
+                    <tr className="border-b border-slate-200">
+                      <th className="px-6 py-3 text-left text-xs font-semibold text-slate-700">Site</th>
+                      <th className="px-6 py-3 text-left text-xs font-semibold text-slate-700">Supervisor</th>
+                      <th className="px-6 py-3 text-left text-xs font-semibold text-slate-700">Total</th>
+                      <th className="px-6 py-3 text-left text-xs font-semibold text-slate-700">Filled</th>
+                      <th className="px-6 py-3 text-left text-xs font-semibold text-slate-700">Gap</th>
+                      <th className="px-6 py-3 text-left text-xs font-semibold text-slate-700">Rate</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {sitesWithGaps.map((site) => (
+                      <tr key={site.code} className="border-b border-slate-200 hover:bg-slate-50">
+                        <td className="px-6 py-3">
+                          <span className="font-mono text-sm font-semibold text-slate-900">{site.code}</span>
+                        </td>
+                        <td className="px-6 py-3 text-sm text-slate-700">{site.supervisor}</td>
+                        <td className="px-6 py-3 text-sm text-slate-700">{site.total}</td>
+                        <td className="px-6 py-3 text-sm text-slate-700">{site.filled}</td>
+                        <td className="px-6 py-3 text-sm font-medium text-red-600">{site.gap}</td>
+                        <td className="px-6 py-3">
+                          <Badge
+                            variant="secondary"
+                            className={`${
+                              parseInt(site.rate) >= 80
+                                ? 'bg-green-100 text-green-700'
+                                : parseInt(site.rate) >= 50
+                                  ? 'bg-amber-100 text-amber-700'
+                                  : 'bg-red-100 text-red-700'
+                            }`}
+                          >
+                            {site.rate}
+                          </Badge>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </Card>
+            </div>
           )}
           {activeTab === 'attendance' && (
             <p className="text-slate-600">Attendance content</p>
