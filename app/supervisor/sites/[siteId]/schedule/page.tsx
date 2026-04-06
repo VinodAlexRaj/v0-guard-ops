@@ -1,12 +1,13 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useRouter, useParams } from 'next/navigation'
 import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
 import { LogOut, ChevronLeft, ChevronRight } from 'lucide-react'
+import { supabase } from '@/lib/supabase/client'
 
 export default function SchedulePage() {
   const router = useRouter()
@@ -16,7 +17,12 @@ export default function SchedulePage() {
   const [selectedCell, setSelectedCell] = useState({ shiftIndex: 1, dayIndex: 2 }) // Wed Afternoon pre-selected
   const [assignmentType, setAssignmentType] = useState('Planned')
   const [searchQuery, setSearchQuery] = useState('')
-  const [selectedGuard, setSelectedGuard] = useState<{ name: string; status: string } | null>(null)
+  const [selectedGuard, setSelectedGuard] = useState<{ id: string; full_name: string; status: string } | null>(null)
+  const [roster, setRoster] = useState<any[][][]>([])
+  const [guardsDirectory, setGuardsDirectory] = useState<any[]>([])
+  const [coverageData, setCoverageData] = useState<number[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
 
   const handleSignOut = () => {
     router.push('/')
@@ -26,19 +32,14 @@ export default function SchedulePage() {
     router.push('/supervisor/overview')
   }
 
-  // Mock data
-  const siteNames: Record<string, string> = {
-    'KLSNT01': 'Sentral Tower',
-  }
-  const siteName = siteNames[siteId] || 'Site'
-
   const weekStart = new Date(2026, 3, 7) // April 7, 2026
+  const weekEnd = new Date(2026, 3, 13) // April 13, 2026
   const today = new Date(2026, 3, 10) // April 10, 2026 (Thursday)
 
   const shifts = [
-    { name: 'Morning', time: '06:00-14:00', required: 3 },
-    { name: 'Afternoon', time: '14:00-22:00', required: 2 },
-    { name: 'Night', time: '22:00-06:00', required: 2 },
+    { name: 'Morning', code: 'MRN', time: '06:00-14:00', required: 3 },
+    { name: 'Afternoon', code: 'AFT', time: '14:00-22:00', required: 2 },
+    { name: 'Night', code: 'NGT', time: '22:00-06:00', required: 2 },
   ]
 
   const days = Array.from({ length: 7 }, (_, i) => {
@@ -48,46 +49,186 @@ export default function SchedulePage() {
   })
 
   const dayNames = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
-  const coverageData = [100, 100, 67, 33, 0, 100, 100]
 
-  // Roster data structured as [shiftIndex][dayIndex] = array of [name, status, isAbsent]
-  const roster = [
-    [
-      [['Ahmad R.', 'planned'], ['Siti N.', 'planned'], ['Rajan M.', 'planned']],
-      [['Ahmad R.', 'planned'], ['Siti N.', 'planned'], ['Kamal A.', 'replacement']],
-      [['Ahmad R.', 'planned'], ['Siti N.', 'planned'], null],
-      [['Ahmad R.', 'absent'], null, null],
-      [null, null, null],
-      [['Ahmad R.', 'planned'], ['Siti N.', 'planned'], ['Rajan M.', 'planned']],
-      [['Ahmad R.', 'planned'], ['Siti N.', 'planned'], ['Rajan M.', 'planned']],
-    ],
-    [
-      [['Lim C.H.', 'planned'], ['Nora B.', 'planned']],
-      [['Lim C.H.', 'planned'], ['Nora B.', 'planned']],
-      [['Lim C.H.', 'planned'], null],
-      [null, null],
-      [null, null],
-      [['Lim C.H.', 'planned'], ['Nora B.', 'planned']],
-      [['Lim C.H.', 'planned'], ['Nora B.', 'planned']],
-    ],
-    [
-      [['Hafiz D.', 'planned'], ['Mei L.', 'planned']],
-      [['Hafiz D.', 'planned'], ['Mei L.', 'planned']],
-      [['Hafiz D.', 'planned'], ['Mei L.', 'planned']],
-      [['Hafiz D.', 'planned'], ['Mei L.', 'planned']],
-      [null, null],
-      [['Hafiz D.', 'planned'], ['Mei L.', 'planned']],
-      [['Hafiz D.', 'planned'], ['Mei L.', 'planned']],
-    ],
-  ]
+  // Fetch schedule and guards data
+  useEffect(() => {
+    const initializeData = async () => {
+      try {
+        setLoading(true)
+        await Promise.all([fetchSchedule(), fetchGuards()])
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Failed to load schedule')
+        console.error('[v0] Error loading schedule:', err)
+      } finally {
+        setLoading(false)
+      }
+    }
 
-  const guardsDirectory = [
-    { name: 'Nora B.', status: 'available' },
-    { name: 'Rajan M.', status: 'available' },
-    { name: 'Kamal A.', status: 'available' },
-    { name: 'Siti N.', status: 'on leave' },
-    { name: 'Ahmad R.', status: 'double-booked' },
-  ]
+    initializeData()
+  }, [])
+
+  async function fetchSchedule() {
+    const { data: slots, error: slotsError } = await supabase
+      .from('roster_slots')
+      .select(
+        `
+        id,
+        shift_date,
+        start_time,
+        end_time,
+        shift_definition_id,
+        shift_definitions (
+          shift_name,
+          shift_code,
+          required_headcount
+        ),
+        shift_assignments (
+          id,
+          guard_id,
+          assignment_type,
+          is_cancelled,
+          users (
+            full_name,
+            external_employee_code
+          )
+        )
+      `
+      )
+      .eq('site_id', siteId)
+      .gte('shift_date', weekStart.toISOString().split('T')[0])
+      .lte('shift_date', weekEnd.toISOString().split('T')[0])
+      .order('shift_date')
+
+    if (slotsError) throw slotsError
+
+    // Transform slots into grid structure
+    const rosterGrid = [
+      Array(7).fill(null).map(() => []),
+      Array(7).fill(null).map(() => []),
+      Array(7).fill(null).map(() => []),
+    ]
+
+    slots?.forEach((slot: any) => {
+      const shiftDate = new Date(slot.shift_date)
+      const dayIndex = (shiftDate.getDay() + 6) % 7 // Convert Sunday=0 to Monday=0
+      const shiftCode = slot.shift_definitions?.shift_code
+      const shiftIndex = shifts.findIndex(s => s.code === shiftCode)
+
+      if (shiftIndex >= 0 && dayIndex >= 0 && dayIndex < 7) {
+        const assignments = (slot.shift_assignments || []).filter((a: any) => !a.is_cancelled)
+        assignments.forEach((assignment: any) => {
+          rosterGrid[shiftIndex][dayIndex].push([
+            assignment.users?.full_name || 'Unknown',
+            assignment.assignment_type.toLowerCase(),
+            assignment.id,
+          ])
+        })
+
+        // Calculate coverage
+        const required = slot.shift_definitions?.required_headcount || 0
+        const filled = assignments.length
+        if (!coverageData[dayIndex]) coverageData[dayIndex] = 0
+        // Store coverage info (simplified for now)
+      }
+    })
+
+    setRoster(rosterGrid)
+    setCoverageData(Array(7).fill(100)) // Placeholder - calculate actual coverage
+  }
+
+  async function fetchGuards() {
+    const { data: guards, error: guardsError } = await supabase
+      .from('users')
+      .select('id, full_name, external_employee_code')
+      .eq('is_active', true)
+
+    if (guardsError) throw guardsError
+
+    const guardsList = (guards || []).map((g: any) => ({
+      id: g.id,
+      full_name: g.full_name,
+      external_employee_code: g.external_employee_code,
+      status: 'available',
+    }))
+
+    setGuardsDirectory(guardsList)
+  }
+
+  async function saveAssignment() {
+    if (!selectedGuard) return
+
+    try {
+      const cellData = getSelectedCellData()
+      const slot = await getSlotForCell(cellData.shiftIndex, cellData.dayIndex)
+
+      if (!slot) {
+        alert('Could not find slot for this assignment')
+        return
+      }
+
+      const { error } = await supabase.from('shift_assignments').insert({
+        roster_slot_id: slot.id,
+        site_id: siteId,
+        guard_id: selectedGuard.id,
+        start_time: slot.start_time,
+        end_time: slot.end_time,
+        assignment_type: assignmentType.toUpperCase(),
+        reason: null,
+        is_cancelled: false,
+      })
+
+      if (error) {
+        alert(parseTriggerError(error.message))
+        return
+      }
+
+      setSelectedGuard(null)
+      setSearchQuery('')
+      await fetchSchedule()
+    } catch (err) {
+      console.error('[v0] Error saving assignment:', err)
+      alert('Failed to save assignment')
+    }
+  }
+
+  async function cancelAssignment(assignmentId: string) {
+    try {
+      const { error } = await supabase
+        .from('shift_assignments')
+        .update({ is_cancelled: true })
+        .eq('id', assignmentId)
+
+      if (error) throw error
+      await fetchSchedule()
+    } catch (err) {
+      console.error('[v0] Error cancelling assignment:', err)
+      alert('Failed to cancel assignment')
+    }
+  }
+
+  async function getSlotForCell(shiftIndex: number, dayIndex: number) {
+    const shiftCode = shifts[shiftIndex]?.code
+    const slotDate = days[dayIndex]
+    const dateStr = slotDate.toISOString().split('T')[0]
+
+    const { data: slots } = await supabase
+      .from('roster_slots')
+      .select('id, start_time, end_time')
+      .eq('site_id', siteId)
+      .eq('shift_date', dateStr)
+      .order('start_time')
+      .limit(1)
+
+    return slots?.[0]
+  }
+
+  function parseTriggerError(message: string): string {
+    if (message.includes('Headcount exceeded')) return 'This slot is already full.'
+    if (message.includes('Guard is on approved leave')) return 'This guard is on approved leave on that date.'
+    if (message.includes('Invalid assignment')) return 'The assignment falls outside the slot time window.'
+    if (message.includes('No double booking')) return 'This guard is already assigned during that time.'
+    return message
+  }
 
   const getCoverageColor = (percentage: number) => {
     if (percentage >= 80) return 'bg-green-100 text-green-700'
@@ -104,11 +245,11 @@ export default function SchedulePage() {
   }
 
   const getRosterCell = (shiftIndex: number, dayIndex: number) => {
-    return roster[shiftIndex][dayIndex] || []
+    return roster?.[shiftIndex]?.[dayIndex] || []
   }
 
   const getAssignedCount = (shiftIndex: number, dayIndex: number) => {
-    return getRosterCell(shiftIndex, dayIndex).filter((cell) => cell !== null).length
+    return getRosterCell(shiftIndex, dayIndex).filter((cell) => cell !== null && cell !== undefined).length
   }
 
   const getSelectedCellData = () => {
@@ -130,7 +271,7 @@ export default function SchedulePage() {
   }
 
   const filteredGuards = guardsDirectory.filter((g) =>
-    g.name.toLowerCase().includes(searchQuery.toLowerCase())
+    g.full_name.toLowerCase().includes(searchQuery.toLowerCase())
   )
 
   const dateStr = today.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: '2-digit', year: 'numeric' })
@@ -171,13 +312,25 @@ export default function SchedulePage() {
 
       {/* Schedule Content */}
       <div className="p-8 flex gap-8">
-          <div className="flex-1">
-            {/* Site Pill */}
-            <div className="mb-6">
-              <Badge className="bg-slate-100 text-slate-700 border-0 px-3 py-1 text-sm">
-                {siteId} — {siteName}
-              </Badge>
-            </div>
+        {loading && (
+          <div className="flex items-center justify-center p-8">
+            <p className="text-slate-600">Loading schedule...</p>
+          </div>
+        )}
+        {error && (
+          <div className="flex items-center justify-center p-8">
+            <p className="text-red-600">Error: {error}</p>
+          </div>
+        )}
+        {!loading && !error && (
+          <>
+            <div className="flex-1">
+              {/* Site Pill */}
+              <div className="mb-6">
+                <Badge className="bg-slate-100 text-slate-700 border-0 px-3 py-1 text-sm">
+                  {siteId}
+                </Badge>
+              </div>
 
             {/* Week Navigation */}
             <div className="flex items-center justify-between mb-6">
@@ -186,7 +339,7 @@ export default function SchedulePage() {
                   <ChevronLeft className="w-5 h-5" />
                 </Button>
                 <span className="text-sm font-medium text-slate-900">
-                  {days[0].getDate()} – {days[6].getDate()} Apr 2026
+                  {weekStart.getDate()} – {weekEnd.getDate()} Apr 2026
                 </span>
                 <Button variant="ghost" size="sm" className="text-slate-600">
                   <ChevronRight className="w-5 h-5" />
@@ -263,15 +416,25 @@ export default function SchedulePage() {
                               <div className="space-y-2">
                                 {cells.map((cell, cellIdx) => (
                                   <div key={cellIdx}>
-                                    {cell ? (
-                                      <div className={`px-2 py-1 rounded text-xs font-medium ${getChipColor(cell[1])}`}>
-                                        {cell[0]}
-                                      </div>
-                                    ) : (
-                                      <div className={`px-2 py-1 rounded text-xs font-medium ${getChipColor(null)}`}>
-                                        + assign
-                                      </div>
-                                    )}
+                            cell ? (
+                              <div key={cellIdx} className="flex items-center justify-between">
+                                <div className={`px-2 py-1 rounded text-xs font-medium ${getChipColor(cell[1])}`}>
+                                  {cell[0]}
+                                </div>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => cancelAssignment(cell[2])}
+                                  className="text-slate-400 hover:text-red-600 p-0 h-auto"
+                                >
+                                  ✕
+                                </Button>
+                              </div>
+                            ) : (
+                              <div key={cellIdx} className={`px-2 py-1 rounded text-xs font-medium ${getChipColor(null)}`}>
+                                + assign
+                              </div>
+                            )
                                   </div>
                                 ))}
                               </div>
@@ -350,7 +513,12 @@ export default function SchedulePage() {
                                     {cell[1]}
                                   </Badge>
                                 </div>
-                                <Button variant="ghost" size="sm" className="text-slate-600 hover:text-red-600">
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => cancelAssignment(cell[2])}
+                                  className="text-slate-600 hover:text-red-600"
+                                >
                                   ✕
                                 </Button>
                               </div>
@@ -391,12 +559,12 @@ export default function SchedulePage() {
 
                       {/* Guard List */}
                       <div className="space-y-2 mb-4 max-h-48 overflow-y-auto">
-                        {filteredGuards.map((guard, idx) => {
-                          const isDisabled = guard.status === 'on leave' || guard.status === 'double-booked'
-                          const isSelected = selectedGuard?.name === guard.name
+                        {filteredGuards.map((guard) => {
+                          const isDisabled = guard.status !== 'available'
+                          const isSelected = selectedGuard?.id === guard.id
                           return (
                             <button
-                              key={idx}
+                              key={guard.id}
                               onClick={() => !isDisabled && setSelectedGuard(guard)}
                               disabled={isDisabled}
                               className={`w-full text-left px-3 py-2 rounded text-sm font-medium transition ${
@@ -408,11 +576,9 @@ export default function SchedulePage() {
                               }`}
                             >
                               <div className="flex items-center justify-between">
-                                <span>{guard.name}</span>
+                                <span>{guard.full_name}</span>
                                 {guard.status !== 'available' && (
-                                  <span className="text-xs text-slate-500">
-                                    {guard.status === 'on leave' ? '(on leave)' : '(double-booked)'}
-                                  </span>
+                                  <span className="text-xs text-slate-500">({guard.status})</span>
                                 )}
                               </div>
                             </button>
@@ -421,7 +587,12 @@ export default function SchedulePage() {
                       </div>
 
                       {/* Save Button */}
-                      <Button className="w-full bg-teal-600 hover:bg-teal-700" disabled={!selectedGuard} size="sm">
+                      <Button
+                        onClick={saveAssignment}
+                        disabled={!selectedGuard}
+                        className="w-full bg-teal-600 hover:bg-teal-700"
+                        size="sm"
+                      >
                         Save
                       </Button>
                     </div>
@@ -429,8 +600,143 @@ export default function SchedulePage() {
                 )
               })()}
             </Card>
-          </div>
-        </div>
-      </>
-    )
-  }
+            </div>
+
+            {/* Right Panel */}
+            <div className="w-72 flex-shrink-0">
+              <Card className="border-slate-200 p-6 sticky top-8">
+                {(() => {
+                  const cellData = getSelectedCellData()
+                  const assignedGuards = getRosterCell(cellData.shiftIndex, cellData.dayIndex)
+                  return (
+                    <>
+                      <h3 className="text-lg font-bold text-slate-900 mb-2">
+                        {cellData.shift} — {cellData.date}
+                      </h3>
+                      <div className="text-sm text-slate-600 mb-4">
+                        {cellData.time} · {siteId} · {cellData.filled} of {cellData.required} filled
+                      </div>
+
+                      {/* Headcount Bar */}
+                      <div className="mb-4">
+                        <div className="w-full bg-slate-200 rounded h-2">
+                          <div
+                            className="bg-teal-600 h-2 rounded transition-all"
+                            style={{ width: `${(cellData.filled / cellData.required) * 100}%` }}
+                          ></div>
+                        </div>
+                      </div>
+
+                      {/* Assigned Section */}
+                      <div className="mb-6 pb-6 border-b border-slate-200">
+                        <h4 className="text-sm font-semibold text-slate-900 mb-3">Assigned</h4>
+                        <div className="space-y-2">
+                          {assignedGuards.map(
+                            (cell, idx) =>
+                              cell && (
+                                <div key={idx} className="flex items-center justify-between bg-slate-50 p-3 rounded">
+                                  <div>
+                                    <div className="text-sm font-medium text-slate-900">{cell[0]}</div>
+                                    <Badge
+                                      variant="secondary"
+                                      className={`text-xs mt-1 ${
+                                        cell[1] === 'planned' ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'
+                                      }`}
+                                    >
+                                      {cell[1]}
+                                    </Badge>
+                                  </div>
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => cancelAssignment(cell[2])}
+                                    className="text-slate-600 hover:text-red-600"
+                                  >
+                                    ✕
+                                  </Button>
+                                </div>
+                              )
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Add Guard Section */}
+                      <div>
+                        <h4 className="text-sm font-semibold text-slate-900 mb-3">Add guard</h4>
+
+                        {/* Type Toggle */}
+                        <div className="flex gap-2 mb-4">
+                          {['Planned', 'Replace', 'Ad-hoc'].map((type) => (
+                            <button
+                              key={type}
+                              onClick={() => setAssignmentType(type)}
+                              className={`flex-1 px-2 py-2 rounded text-xs font-medium transition ${
+                                assignmentType === type
+                                  ? 'bg-teal-600 text-white'
+                                  : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                              }`}
+                            >
+                              {type}
+                            </button>
+                          ))}
+                        </div>
+
+                        {/* Search Input */}
+                        <Input
+                          type="text"
+                          placeholder="Search guards..."
+                          value={searchQuery}
+                          onChange={(e) => setSearchQuery(e.target.value)}
+                          className="mb-4 text-sm"
+                        />
+
+                        {/* Guard List */}
+                        <div className="space-y-2 mb-4 max-h-48 overflow-y-auto">
+                          {filteredGuards.map((guard) => {
+                            const isDisabled = guard.status !== 'available'
+                            const isSelected = selectedGuard?.id === guard.id
+                            return (
+                              <button
+                                key={guard.id}
+                                onClick={() => !isDisabled && setSelectedGuard(guard)}
+                                disabled={isDisabled}
+                                className={`w-full text-left px-3 py-2 rounded text-sm font-medium transition ${
+                                  isDisabled
+                                    ? 'bg-slate-100 text-slate-400 cursor-not-allowed'
+                                    : isSelected
+                                      ? 'bg-teal-50 text-teal-700 border-2 border-teal-300'
+                                      : 'bg-slate-50 text-slate-700 hover:bg-slate-100 border border-slate-200'
+                                }`}
+                              >
+                                <div className="flex items-center justify-between">
+                                  <span>{guard.full_name}</span>
+                                  {guard.status !== 'available' && (
+                                    <span className="text-xs text-slate-500">({guard.status})</span>
+                                  )}
+                                </div>
+                              </button>
+                            )
+                          })}
+                        </div>
+
+                        {/* Save Button */}
+                        <Button
+                          onClick={saveAssignment}
+                          disabled={!selectedGuard}
+                          className="w-full bg-teal-600 hover:bg-teal-700"
+                          size="sm"
+                        >
+                          Save
+                        </Button>
+                      </div>
+                    </>
+                  )
+                })()}
+              </Card>
+            </div>
+          </>
+        )}
+      </div>
+    </>
+  )
+}
