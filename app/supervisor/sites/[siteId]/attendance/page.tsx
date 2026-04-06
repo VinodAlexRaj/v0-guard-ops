@@ -23,6 +23,8 @@ export default function AttendancePage() {
       checkOut: '14:01',
       status: 'on_time',
       remarks: '',
+      otMins: 1,
+      otReason: '',
       saved: true,
     },
     {
@@ -30,9 +32,11 @@ export default function AttendancePage() {
       name: 'Siti Norizan',
       code: 'SO0055',
       checkIn: '06:31',
-      checkOut: '',
+      checkOut: '15:30',
       status: 'late',
       remarks: 'Stuck in traffic',
+      otMins: 90,
+      otReason: 'Extended shift',
       saved: true,
     },
     {
@@ -43,6 +47,8 @@ export default function AttendancePage() {
       checkOut: '14:00',
       status: 'on_time',
       remarks: '',
+      otMins: 0,
+      otReason: '',
       saved: true,
     },
     {
@@ -53,6 +59,8 @@ export default function AttendancePage() {
       checkOut: '',
       status: 'absent',
       remarks: 'No show, no contact',
+      otMins: 0,
+      otReason: '',
       saved: false,
     },
     {
@@ -63,6 +71,8 @@ export default function AttendancePage() {
       checkOut: '',
       status: null,
       remarks: '',
+      otMins: 0,
+      otReason: '',
       saved: false,
     },
   ])
@@ -75,9 +85,42 @@ export default function AttendancePage() {
     router.push(`/supervisor/sites/${siteId}/schedule`)
   }
 
+  const calculateOvertimeMinutes = (checkOutTime: string): number => {
+    if (!checkOutTime) return 0
+    
+    const shiftEndTimes: Record<string, string> = {
+      'Morning': '14:00',
+      'Afternoon': '22:00',
+      'Night': '06:00',
+    }
+    
+    const shiftEnd = shiftEndTimes[activeShift]
+    const [endHour, endMin] = shiftEnd.split(':').map(Number)
+    const [checkHour, checkMin] = checkOutTime.split(':').map(Number)
+    
+    const endTotalMins = endHour * 60 + endMin
+    const checkTotalMins = checkHour * 60 + checkMin
+    
+    if (checkTotalMins > endTotalMins) {
+      return checkTotalMins - endTotalMins
+    }
+    return 0
+  }
+
   const updateAttendance = (id: number, field: string, value: any) => {
     setAttendanceData(
-      attendanceData.map((row) => (row.id === id ? { ...row, [field]: value } : row))
+      attendanceData.map((row) => {
+        if (row.id !== id) return row
+        
+        const updated = { ...row, [field]: value }
+        
+        // Auto-calculate OT when check-out time changes
+        if (field === 'checkOut') {
+          updated.otMins = calculateOvertimeMinutes(value)
+        }
+        
+        return updated
+      })
     )
   }
 
@@ -134,6 +177,7 @@ export default function AttendancePage() {
     ['MC', 'AL', 'EL', 'UL'].includes(r.status)
   ).length
   const pendingStatusCount = attendanceData.filter((r) => !r.status).length
+  const withOTCount = attendanceData.filter((r) => r.otMins > 0).length
 
   const todayDate = new Date(2026, 3, 10) // April 10, 2026
   const dateStr = todayDate.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: '2-digit', year: 'numeric' })
@@ -237,6 +281,12 @@ export default function AttendancePage() {
                   <span className="font-semibold text-slate-900">{pendingStatusCount}</span> Pending
                 </span>
               </div>
+              <div className="flex items-center gap-2">
+                <div className="w-3 h-3 rounded-full bg-amber-500"></div>
+                <span className="text-sm text-slate-700">
+                  <span className="font-semibold text-slate-900">{withOTCount}</span> With OT
+                </span>
+              </div>
             </div>
             <div className="text-sm text-slate-600">
               Recorded by: <span className="font-medium text-slate-900">Azri Hamdan</span>
@@ -253,13 +303,20 @@ export default function AttendancePage() {
                     <th className="px-6 py-3 text-left text-xs font-semibold text-slate-700">Check-in</th>
                     <th className="px-6 py-3 text-left text-xs font-semibold text-slate-700">Check-out</th>
                     <th className="px-6 py-3 text-left text-xs font-semibold text-slate-700">Status</th>
+                    <th className="px-6 py-3 text-left text-xs font-semibold text-slate-700">OT (mins)</th>
+                    <th className="px-6 py-3 text-left text-xs font-semibold text-slate-700">OT reason</th>
                     <th className="px-6 py-3 text-left text-xs font-semibold text-slate-700">Remarks</th>
                     <th className="px-6 py-3 text-left text-xs font-semibold text-slate-700">Action</th>
                   </tr>
                 </thead>
                 <tbody>
                   {attendanceData.map((row) => (
-                    <tr key={row.id} className="border-b border-slate-200 hover:bg-slate-50">
+                    <tr
+                      key={row.id}
+                      className={`border-b border-slate-200 hover:bg-slate-50 ${
+                        row.otMins > 0 ? 'border-l-4 border-l-amber-500' : ''
+                      }`}
+                    >
                       <td className="px-6 py-4">
                         <div className="text-sm font-medium text-slate-900">{row.name}</div>
                         <div className="text-xs text-slate-600">{row.code}</div>
@@ -296,6 +353,25 @@ export default function AttendancePage() {
                             </button>
                           ))}
                         </div>
+                      </td>
+                      <td className="px-6 py-4">
+                        <Input
+                          type="number"
+                          value={row.otMins}
+                          onChange={(e) => updateAttendance(row.id, 'otMins', parseInt(e.target.value) || 0)}
+                          placeholder="0"
+                          className="w-16 text-sm"
+                          min="0"
+                        />
+                      </td>
+                      <td className="px-6 py-4">
+                        <Input
+                          type="text"
+                          value={row.otReason}
+                          onChange={(e) => updateAttendance(row.id, 'otReason', e.target.value)}
+                          placeholder="Overtime reason..."
+                          className="text-sm"
+                        />
                       </td>
                       <td className="px-6 py-4">
                         <Input
