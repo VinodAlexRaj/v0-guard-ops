@@ -184,13 +184,21 @@ export default function SchedulePage() {
         return
       }
 
+      // Map UI display values to exact database enum values
+      const typeMap: Record<string, string> = {
+        'Planned': 'planned',
+        'Replace': 'replacement',
+        'Ad-hoc': 'adhoc'
+      }
+      const dbAssignmentType = typeMap[assignmentType] || 'planned'
+
       const { error } = await supabase.from('shift_assignments').insert({
         roster_slot_id: slot.id,
         site_id: siteUUID,
         guard_id: selectedGuard.id,
         start_time: slot.start_time,
         end_time: slot.end_time,
-        assignment_type: assignmentType.toUpperCase(),
+        assignment_type: dbAssignmentType,
         reason: null,
         is_cancelled: false,
       })
@@ -661,139 +669,6 @@ export default function SchedulePage() {
                 )
               })()}
             </Card>
-            </div>
-
-            {/* Right Panel */}
-            <div className="w-72 flex-shrink-0">
-              <Card className="border-slate-200 p-6 sticky top-8">
-                {(() => {
-                  const cellData = getSelectedCellData()
-                  const assignedGuards = getRosterCell(cellData.shiftIndex, cellData.dayIndex)
-                  return (
-                    <>
-                      <h3 className="text-lg font-bold text-slate-900 mb-2">
-                        {cellData.shift} — {cellData.date}
-                      </h3>
-                      <div className="text-sm text-slate-600 mb-4">
-                        {cellData.time} · {siteId} · {cellData.filled} of {cellData.required} filled
-                      </div>
-
-                      {/* Headcount Bar */}
-                      <div className="mb-4">
-                        <div className="w-full bg-slate-200 rounded h-2">
-                          <div
-                            className="bg-teal-600 h-2 rounded transition-all"
-                            style={{ width: `${(cellData.filled / cellData.required) * 100}%` }}
-                          ></div>
-                        </div>
-                      </div>
-
-                      {/* Assigned Section */}
-                      <div className="mb-6 pb-6 border-b border-slate-200">
-                        <h4 className="text-sm font-semibold text-slate-900 mb-3">Assigned</h4>
-                        <div className="space-y-2">
-                          {assignedGuards.map(
-                            (cell, idx) =>
-                              cell && (
-                                <div key={idx} className="flex items-center justify-between bg-slate-50 p-3 rounded">
-                                  <div>
-                                    <div className="text-sm font-medium text-slate-900">{cell[0]}</div>
-                                    <Badge
-                                      variant="secondary"
-                                      className={`text-xs mt-1 ${
-                                        cell[1] === 'planned' ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'
-                                      }`}
-                                    >
-                                      {cell[1]}
-                                    </Badge>
-                                  </div>
-                                  <Button
-                                    variant="ghost"
-                                    size="sm"
-                                    onClick={() => cancelAssignment(cell[2])}
-                                    className="text-slate-600 hover:text-red-600"
-                                  >
-                                    ✕
-                                  </Button>
-                                </div>
-                              )
-                          )}
-                        </div>
-                      </div>
-
-                      {/* Add Guard Section */}
-                      <div>
-                        <h4 className="text-sm font-semibold text-slate-900 mb-3">Add guard</h4>
-
-                        {/* Type Toggle */}
-                        <div className="flex gap-2 mb-4">
-                          {['Planned', 'Replace', 'Ad-hoc'].map((type) => (
-                            <button
-                              key={type}
-                              onClick={() => setAssignmentType(type)}
-                              className={`flex-1 px-2 py-2 rounded text-xs font-medium transition ${
-                                assignmentType === type
-                                  ? 'bg-teal-600 text-white'
-                                  : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
-                              }`}
-                            >
-                              {type}
-                            </button>
-                          ))}
-                        </div>
-
-                        {/* Search Input */}
-                        <Input
-                          type="text"
-                          placeholder="Search guards..."
-                          value={searchQuery}
-                          onChange={(e) => setSearchQuery(e.target.value)}
-                          className="mb-4 text-sm"
-                        />
-
-                        {/* Guard List */}
-                        <div className="space-y-2 mb-4 max-h-48 overflow-y-auto">
-                          {filteredGuards.map((guard) => {
-                            const isDisabled = guard.status !== 'available'
-                            const isSelected = selectedGuard?.id === guard.id
-                            return (
-                              <button
-                                key={guard.id}
-                                onClick={() => !isDisabled && setSelectedGuard(guard)}
-                                disabled={isDisabled}
-                                className={`w-full text-left px-3 py-2 rounded text-sm font-medium transition ${
-                                  isDisabled
-                                    ? 'bg-slate-100 text-slate-400 cursor-not-allowed'
-                                    : isSelected
-                                      ? 'bg-teal-50 text-teal-700 border-2 border-teal-300'
-                                      : 'bg-slate-50 text-slate-700 hover:bg-slate-100 border border-slate-200'
-                                }`}
-                              >
-                                <div className="flex items-center justify-between">
-                                  <span>{guard.full_name}</span>
-                                  {guard.status !== 'available' && (
-                                    <span className="text-xs text-slate-500">({guard.status})</span>
-                                  )}
-                                </div>
-                              </button>
-                            )
-                          })}
-                        </div>
-
-                        {/* Save Button */}
-                        <Button
-                          onClick={saveAssignment}
-                          disabled={!selectedGuard}
-                          className="w-full bg-teal-600 hover:bg-teal-700"
-                          size="sm"
-                        >
-                          Save
-                        </Button>
-                      </div>
-                    </>
-                  )
-                })()}
-              </Card>
             </div>
           </>
         )}
