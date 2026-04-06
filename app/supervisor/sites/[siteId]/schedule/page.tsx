@@ -55,7 +55,7 @@ export default function SchedulePage() {
 
   const dayNames = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
 
-  // Fetch schedule and guards data
+  // Initialize and fetch schedule data from Supabase
   useEffect(() => {
     const initializeData = async () => {
       try {
