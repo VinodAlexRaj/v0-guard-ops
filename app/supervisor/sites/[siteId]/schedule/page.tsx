@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useRouter, useParams } from 'next/navigation'
 import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -29,6 +29,9 @@ export default function SchedulePage() {
   const [guardsDirectory, setGuardsDirectory] = useState<any[]>([])
   const [siteUUID, setSiteUUID] = useState<string | null>(null)
   const [coverageData, setCoverageData] = useState<number[]>([100, 100, 100, 100, 100, 100, 100])
+
+  // Ref to maintain persistent reference to slots data
+  const slotsRef = useRef<any[]>([])
 
   const handleSignOut = () => {
     router.push('/')
@@ -144,6 +147,7 @@ export default function SchedulePage() {
       console.log('[v0] Found guards:', guardsData?.length || 0)
 
       // Update state with separate data
+      slotsRef.current = slotsData
       setSlots(slotsData)
       setShiftDefs(shiftDefsData || [])
       setAssignments(assignmentsData || [])
@@ -151,7 +155,12 @@ export default function SchedulePage() {
 
       // Debug: Log full data structures
       console.log('[v0] ========== FETCH COMPLETE ==========')
-      console.log('[v0] Slots (sample):', JSON.stringify(slotsData?.slice(0, 2), null, 2))
+      console.log('[v0] Fetched slots:', JSON.stringify(slotsData?.map(s => ({
+        id: s.id,
+        shift_date: s.shift_date,
+        start_time: s.start_time,
+        end_time: s.end_time
+      }))))
       console.log('[v0] Shift defs:', JSON.stringify(shiftDefsData, null, 2))
       console.log('[v0] Assignments count:', assignmentsData?.length)
       console.log('[v0] Assignments (sample):', JSON.stringify(assignmentsData?.slice(0, 3), null, 2))
@@ -186,10 +195,17 @@ export default function SchedulePage() {
     if (!selectedSlot || !selectedGuard || !siteUUID) return
 
     try {
-      // Find the full slot data from the slots array using selectedSlot.id
-      const fullSlot = slots.find(s => s.id === selectedSlot.id)
+      // Debug: Log what we're looking for
+      console.log('[v0] saveAssignment called')
+      console.log('[v0] slotsRef.current length:', slotsRef.current.length)
+      console.log('[v0] looking for slot id:', selectedSlot?.id)
+      console.log('[v0] slots ids:', slotsRef.current.map(s => s.id))
+
+      // Find the full slot data from the slotsRef using selectedSlot.id
+      const fullSlot = slotsRef.current.find(s => s.id === selectedSlot.id)
 
       if (!fullSlot) {
+        console.error('[v0] Could not find slot data in slotsRef')
         alert('Could not find slot data')
         return
       }
@@ -558,6 +574,10 @@ export default function SchedulePage() {
                                 setSelectedCell({ shiftIndex: shiftIdx, dayIndex: dayIdx })
                                 // Find and set the slot for this cell
                                 const slot = getSlotForCell(shiftIdx, dayIdx)
+                                console.log('[v0] Cell clicked:', {
+                                  shift_date: slot?.shift_date,
+                                  slot_id: slot?.id
+                                })
                                 setSelectedSlot(slot)
                               }}
                               className={`px-4 py-3 text-center cursor-pointer transition ${
