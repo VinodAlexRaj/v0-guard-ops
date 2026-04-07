@@ -28,6 +28,7 @@ export default function SchedulePage() {
   const [guardsDirectory, setGuardsDirectory] = useState<any[]>([])
   const [siteUUID, setSiteUUID] = useState<string | null>(null)
   const [coverageData, setCoverageData] = useState<number[]>([100, 100, 100, 100, 100, 100, 100])
+  const [guardShiftCounts, setGuardShiftCounts] = useState<Map<string, Map<string, number>>>(new Map()) // Map<dateStr, Map<guardId, count>>
 
   // Ref to maintain persistent reference to slots data
   const slotsRef = useRef<any[]>([])
@@ -152,17 +153,33 @@ export default function SchedulePage() {
       setAssignments(assignmentsData || [])
       setGuardNames(guardsData || [])
 
-      // Debug: Log full data structures
-      console.log('[v0] ========== FETCH COMPLETE ==========')
-      console.log('[v0] Slots count:', slotsData.length)
-      console.log('[v0] Shift defs:', shiftDefsData?.map(s => `${s.shift_code}: required=${s.required_headcount}`))
-      console.log('[v0] Assignments:', assignmentsData?.map(a => `guard=${a.guard_id.slice(0,8)} type=${a.assignment_type}`))
-      console.log('[v0] Guards:', guardsData?.map(g => g.full_name))
-      console.log('[v0] =====================================')
+      // Calculate guard shift counts per day for shift overload warnings
+      calculateGuardShiftCounts(assignmentsData || [], slotsData)
     } catch (err) {
       console.error('[v0] fetchSchedule error:', err)
       throw err
     }
+  }
+
+  function calculateGuardShiftCounts(assignmentsData: any[], slotsData: any[]) {
+    const countMap = new Map<string, Map<string, number>>()
+
+    // For each assignment, increment the count for that guard on that date
+    assignmentsData.forEach((assignment: any) => {
+      const slot = slotsData.find(s => s.id === assignment.roster_slot_id)
+      if (!slot) return
+
+      const dateStr = slot.shift_date // format: YYYY-MM-DD
+      if (!countMap.has(dateStr)) {
+        countMap.set(dateStr, new Map())
+      }
+
+      const guardMap = countMap.get(dateStr)!
+      const currentCount = guardMap.get(assignment.guard_id) || 0
+      guardMap.set(assignment.guard_id, currentCount + 1)
+    })
+
+    setGuardShiftCounts(countMap)
   }
 
   async function fetchGuards() {
@@ -430,11 +447,17 @@ export default function SchedulePage() {
     return 'text-red-600'
   }
 
-  function getChipColor(status: string | null) {
-    if (status === 'planned') return 'bg-green-100 text-green-700 border-0'
-    if (status === 'replacement') return 'bg-amber-100 text-amber-700 border-0'
-    if (status === 'adhoc') return 'bg-purple-100 text-purple-700 border-0'
-    if (status === 'absent') return 'bg-red-100 text-red-700 border-0 line-through'
+  function getChipColor(status: string | null, shiftCount: number = 1) {
+    // For assigned guards, check shift overload count
+    if (status) {
+      if (shiftCount >= 3) return 'bg-red-100 text-red-700 border-0 font-semibold'
+      if (shiftCount === 2) return 'bg-amber-100 text-amber-700 border-0 font-semibold'
+      // Otherwise apply normal assignment type colors
+      if (status === 'planned') return 'bg-green-100 text-green-700 border-0'
+      if (status === 'replacement') return 'bg-amber-100 text-amber-700 border-0'
+      if (status === 'adhoc') return 'bg-purple-100 text-purple-700 border-0'
+      if (status === 'absent') return 'bg-red-100 text-red-700 border-0 line-through'
+    }
     return 'border-2 border-dashed border-slate-300 text-slate-500'
   }
 
@@ -596,11 +619,20 @@ export default function SchedulePage() {
                             >
                               <div className="space-y-1">
                                 {/* Show assigned guard chips */}
-                                {cells.map((cell, cellIdx) => (
-                                  <div key={cellIdx} className={`px-2 py-1 rounded text-xs font-medium ${getChipColor(cell[1])}`}>
-                                    {cell[0]}
-                                  </div>
-                                ))}
+                                {cells.map((cell, cellIdx) => {
+                                  // Get shift count for this guard on this date
+                                  const dateObj = days[dayIdx]
+                                  const dateStr = dateObj.toISOString().split('T')[0]
+                                  const guardMap = guardShiftCounts.get(dateStr) || new Map()
+                                  const guardId = cell[2] ? assignments.find(a => a.id === cell[2])?.guard_id : null
+                                  const shiftCount = guardId ? (guardMap.get(guardId) || 1) : 1
+                                  
+                                  return (
+                                    <div key={cellIdx} className={`px-2 py-1 rounded text-xs font-medium ${getChipColor(cell[1], shiftCount)}`}>
+                                      {cell[0]}
+                                    </div>
+                                  )
+                                })}
                                 {/* Show "+ assign" chips for unfilled slots */}
                                 {Array.from({ length: unfilled }).map((_, idx) => (
                                   <div key={`empty-${idx}`} className={`px-2 py-1 rounded text-xs font-medium ${getChipColor(null)}`}>
@@ -618,23 +650,31 @@ export default function SchedulePage() {
               </div>
             </Card>
 
-            {/* Legend */}
-            <div className="mt-6 flex gap-6 text-xs text-slate-600">
-              <div className="flex items-center gap-2">
-                <div className="w-3 h-3 rounded bg-green-100 border border-green-200"></div>
-                <span>Planned</span>
+            {/* Legend & Warning */}
+            <div>
+              {/* Warning Note */}
+              <div className="mb-4 p-3 bg-amber-50 border border-amber-200 rounded text-xs text-amber-800">
+                <strong>Shift Overload Warning:</strong> Guards highlighted in <strong>amber</strong> are assigned to 2 shifts today. Guards in <strong>red</strong> are assigned to 3+ shifts — please review.
               </div>
-              <div className="flex items-center gap-2">
-                <div className="w-3 h-3 rounded bg-amber-100 border border-amber-200"></div>
-                <span>Replacement</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <div className="w-3 h-3 rounded bg-purple-100 border border-purple-200"></div>
-                <span>Ad-hoc</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <div className="w-3 h-3 rounded bg-red-100 border border-red-200"></div>
-                <span>Absent</span>
+
+              {/* Legend */}
+              <div className="flex flex-col gap-2 text-xs text-slate-600">
+                <div className="flex items-center gap-2">
+                  <div className="w-3 h-3 rounded bg-green-100 border border-green-200"></div>
+                  <span>Green = Planned (1 shift)</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <div className="w-3 h-3 rounded bg-amber-100 border border-amber-200"></div>
+                  <span>Amber = Double shift (2 shifts)</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <div className="w-3 h-3 rounded bg-red-100 border border-red-200"></div>
+                  <span>Red = Triple shift (3+ shifts)</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <div className="w-3 h-3 rounded border-2 border-dashed border-slate-300"></div>
+                  <span>Dashed = Unassigned slot</span>
+                </div>
               </div>
             </div>
           </div>
