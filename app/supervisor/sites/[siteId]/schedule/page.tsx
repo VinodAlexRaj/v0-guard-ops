@@ -543,22 +543,28 @@ export default function SchedulePage() {
             </div>
 
             {/* Coverage Strip */}
-            <div className="grid grid-cols-7 gap-2 mb-6">
-              {days.map((day, idx) => {
-                const isToday = day.getTime() === today.getTime()
-                const coverage = realCoverageData[idx]
-                return (
-                  <div
-                    key={idx}
-                    className={`p-3 rounded-lg border ${isToday ? 'bg-blue-50 border-blue-200' : 'bg-white border-slate-200'}`}
-                  >
-                    <div className="text-xs font-semibold text-slate-700 mb-2">
-                      {dayNames[idx]} {day.getDate()}
+            <div className="flex gap-2 mb-6">
+              {/* Spacer to align with Shift column */}
+              <div className="w-32 flex-shrink-0"></div>
+              
+              {/* Days columns */}
+              <div className="grid grid-cols-7 gap-2 flex-1">
+                {days.map((day, idx) => {
+                  const isToday = day.getTime() === today.getTime()
+                  const coverage = realCoverageData[idx]
+                  return (
+                    <div
+                      key={idx}
+                      className={`p-3 rounded-lg border ${isToday ? 'bg-blue-50 border-blue-200' : 'bg-white border-slate-200'}`}
+                    >
+                      <div className="text-xs font-semibold text-slate-700 mb-2">
+                        {dayNames[idx]} {day.getDate()}
+                      </div>
+                      <div className={`text-lg font-bold ${getCoverageColor(coverage)}`}>{coverage}%</div>
                     </div>
-                    <div className={`text-lg font-bold ${getCoverageColor(coverage)}`}>{coverage}%</div>
-                  </div>
-                )
-              })}
+                  )
+                })}
+              </div>
             </div>
 
             {/* Roster Grid */}
@@ -752,37 +758,51 @@ export default function SchedulePage() {
 
                       {/* Guard List */}
                       <div className="space-y-2 mb-4 max-h-48 overflow-y-auto">
-                        {filteredGuards.map((guard) => {
-                          // Check if guard is already assigned to selected slot
-                          const isAlreadyAssigned = selectedSlot && assignments.some(
-                            a => a.guard_id === guard.id && a.roster_slot_id === selectedSlot.id
-                          )
-                          const isDisabled = guard.status !== 'available' || isAlreadyAssigned
-                          const isSelected = selectedGuard?.id === guard.id
-                          return (
-                            <button
-                              key={guard.id}
-                              onClick={() => !isDisabled && setSelectedGuard(guard)}
-                              disabled={isDisabled}
-                              className={`w-full text-left px-3 py-2 rounded text-sm font-medium transition ${
-                                isDisabled
-                                  ? 'bg-slate-100 text-slate-400 cursor-not-allowed'
-                                  : isSelected
-                                    ? 'bg-teal-50 text-teal-700 border-2 border-teal-300'
-                                    : 'bg-slate-50 text-slate-700 hover:bg-slate-100 border border-slate-200'
-                              }`}
-                            >
-                              <div className="flex items-center justify-between">
-                                <span>{guard.full_name}</span>
-                                {isAlreadyAssigned ? (
-                                  <span className="text-xs text-green-600">(assigned)</span>
-                                ) : guard.status !== 'available' && (
-                                  <span className="text-xs text-slate-500">({guard.status})</span>
-                                )}
-                              </div>
-                            </button>
-                          )
-                        })}
+                        {filteredGuards
+                          .filter(guard => {
+                            // Hide guards already assigned to THIS slot
+                            const isAlreadyAssignedToThisSlot = selectedSlot && assignments.some(
+                              a => a.guard_id === guard.id && a.roster_slot_id === selectedSlot.id
+                            )
+                            return !isAlreadyAssignedToThisSlot
+                          })
+                          .map((guard) => {
+                            // Check if guard is assigned to a DIFFERENT slot today
+                            const dateStr = selectedSlot ? new Date(selectedSlot.shift_date).toISOString().split('T')[0] : null
+                            const isAssignedToOtherSlotToday = dateStr && assignments.some(a => {
+                              const slotDate = slotsRef.current.find(s => s.id === a.roster_slot_id)?.shift_date
+                              const assignmentDateStr = slotDate ? new Date(slotDate).toISOString().split('T')[0] : null
+                              return a.guard_id === guard.id && 
+                                     assignmentDateStr === dateStr && 
+                                     a.roster_slot_id !== selectedSlot?.id
+                            })
+                            
+                            const isDisabled = guard.status !== 'available' || isAssignedToOtherSlotToday
+                            const isSelected = selectedGuard?.id === guard.id
+                            return (
+                              <button
+                                key={guard.id}
+                                onClick={() => !isDisabled && setSelectedGuard(guard)}
+                                disabled={isDisabled}
+                                className={`w-full text-left px-3 py-2 rounded text-sm font-medium transition ${
+                                  isDisabled
+                                    ? 'bg-slate-100 text-slate-400 cursor-not-allowed'
+                                    : isSelected
+                                      ? 'bg-teal-50 text-teal-700 border-2 border-teal-300'
+                                      : 'bg-slate-50 text-slate-700 hover:bg-slate-100 border border-slate-200'
+                                }`}
+                              >
+                                <div className="flex items-center justify-between">
+                                  <span>{guard.full_name}</span>
+                                  {isAssignedToOtherSlotToday ? (
+                                    <span className="text-xs text-slate-500">(on another shift)</span>
+                                  ) : guard.status !== 'available' && (
+                                    <span className="text-xs text-slate-500">({guard.status})</span>
+                                  )}
+                                </div>
+                              </button>
+                            )
+                          })}
                       </div>
 
                         {/* Save Button */}
