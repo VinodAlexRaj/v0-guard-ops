@@ -60,14 +60,16 @@ export default function AttendancePage() {
         setLoading(true)
 
         // 1. Get site UUID from site_code
-        const { data: site } = await supabase
+        const { data: site, error: siteError } = await supabase
           .from('sites')
-          .select('id, site_name')
+          .select('id')
           .eq('site_code', siteId.toUpperCase())
           .single()
 
-        if (!site) throw new Error('Site not found')
-        setSiteName(site.site_name)
+        if (siteError || !site) {
+          throw new Error('Site not found')
+        }
+        setSiteName(siteId.toUpperCase()) // Use site code as display name
 
         // 2. Get shift definitions for this site
         const { data: shiftDefs } = await supabase
