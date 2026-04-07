@@ -138,14 +138,15 @@ export default function SchedulePage() {
       if (assignmentsError) throw assignmentsError
       console.log('[v0] Found assignments:', assignmentsData?.length || 0)
 
-      // Query 4 — get guard names
-      const guardIds = [...new Set(assignmentsData?.map(a => a.guard_id) || [])]
-      const { data: guardsData } = guardIds.length > 0
-        ? await supabase
-            .from('users')
-            .select('id, full_name, external_employee_code')
-            .in('id', guardIds)
-        : { data: [] }
+  // Query 4 — get guard names (only actual guards, not supervisors/managers)
+  const guardIds = [...new Set(assignmentsData?.map(a => a.guard_id) || [])]
+  const { data: guardsData } = guardIds.length > 0
+    ? await supabase
+        .from('users')
+        .select('id, full_name, external_employee_code, external_role')
+        .in('id', guardIds)
+        .in('external_role', ['SECURITY OFFICER', 'NEPALESE SECURITY OFFICER'])
+    : { data: [] }
 
       console.log('[v0] Found guards:', guardsData?.length || 0)
 
@@ -213,8 +214,9 @@ export default function SchedulePage() {
   async function fetchGuards() {
     const { data: guards, error: guardsError } = await supabase
       .from('users')
-      .select('id, full_name, external_employee_code')
+      .select('id, full_name, external_employee_code, external_role')
       .eq('is_active', true)
+      .in('external_role', ['SECURITY OFFICER', 'NEPALESE SECURITY OFFICER'])
 
     if (guardsError) throw guardsError
 
