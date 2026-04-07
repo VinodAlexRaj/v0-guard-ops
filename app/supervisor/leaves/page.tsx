@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -14,17 +14,45 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { LogOut } from 'lucide-react'
+import { supabase } from '@/lib/supabase/client'
 
 export default function SupervisorLeavesPage() {
   const router = useRouter()
   const [viewMode, setViewMode] = useState<'week' | 'month'>('week')
+  const [currentUser, setCurrentUser] = useState<any>(null)
+  const [dateStr, setDateStr] = useState('')
 
   const handleSignOut = () => {
     router.push('/')
   }
 
-  const todayDate = new Date(2026, 3, 10) // April 10, 2026
-  const dateStr = todayDate.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: '2-digit', year: 'numeric' })
+  useEffect(() => {
+    const todayDate = new Date()
+    const formatted = todayDate.toLocaleDateString('en-US', {
+      weekday: 'short',
+      month: 'short',
+      day: '2-digit',
+      year: 'numeric',
+    })
+    setDateStr(formatted)
+  }, [])
+
+  useEffect(() => {
+    const fetchUser = async () => {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) {
+        router.push('/')
+        return
+      }
+      const { data: userData } = await supabase
+        .from('users')
+        .select('id, full_name')
+        .eq('id', user.id)
+        .single()
+      setCurrentUser(userData)
+    }
+    fetchUser()
+  }, [router])
 
   // Mock data for summary stats
   const summaryStats = [
@@ -136,7 +164,7 @@ export default function SupervisorLeavesPage() {
           <div className="text-sm text-slate-600">{dateStr}</div>
           <div className="flex items-center gap-4">
             <div className="text-right">
-              <p className="text-sm font-medium text-slate-900">Azri Hamdan</p>
+              <p className="text-sm font-medium text-slate-900">{currentUser?.full_name || 'User'}</p>
               <Badge variant="secondary" className="mt-1">
                 Supervisor
               </Badge>

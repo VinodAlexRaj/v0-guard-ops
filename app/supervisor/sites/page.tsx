@@ -36,6 +36,7 @@ export default function SupervisorSitesPage() {
   const [sitesWithGaps, setSitesWithGaps] = useState(0)
   const [fullyFilled, setFullyFilled] = useState(0)
   const [sitesData, setSitesData] = useState<SiteRow[]>([])
+  const [currentUser, setCurrentUser] = useState<any>(null)
 
   const handleSignOut = () => {
     router.push('/')
@@ -69,6 +70,12 @@ export default function SupervisorSitesPage() {
           router.push('/')
           return
         }
+        const { data: userData } = await supabase
+          .from('users')
+          .select('id, full_name')
+          .eq('id', user.id)
+          .single()
+        setCurrentUser(userData)
 
         const { data: supervisorSites } = await supabase
           .from('supervisor_sites')
@@ -165,7 +172,7 @@ export default function SupervisorSitesPage() {
           <div className="text-sm text-slate-600">{dateStr}</div>
           <div className="flex items-center gap-4">
             <div className="text-right">
-              <p className="text-sm font-medium text-slate-900">Azri Hamdan</p>
+              <p className="text-sm font-medium text-slate-900">{currentUser?.full_name || 'User'}</p>
               <Badge variant="secondary" className="mt-1">
                 Supervisor
               </Badge>

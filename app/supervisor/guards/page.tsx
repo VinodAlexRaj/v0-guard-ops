@@ -84,7 +84,12 @@ export default function GuardsPage() {
           router.push('/')
           return
         }
-        setCurrentUser(user)
+        const { data: userData } = await supabase
+          .from('users')
+          .select('id, full_name')
+          .eq('id', user.id)
+          .single()
+        setCurrentUser(userData)
 
         // FETCH 1 — Get supervisor's sites
         const { data: supervisorSites } = await supabase
@@ -190,7 +195,7 @@ export default function GuardsPage() {
           <div className="text-sm text-slate-600">{dateStr}</div>
           <div className="flex items-center gap-4">
             <div className="text-right">
-              <p className="text-sm font-medium text-slate-900">{currentUser?.user_metadata?.full_name || 'User'}</p>
+              <p className="text-sm font-medium text-slate-900">{currentUser?.full_name || 'User'}</p>
               <Badge variant="secondary" className="mt-1">
                 Supervisor
               </Badge>
