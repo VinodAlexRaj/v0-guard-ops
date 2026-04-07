@@ -13,14 +13,21 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
-import { LogOut } from 'lucide-react'
+import { LogOut, AlertCircle } from 'lucide-react'
 import { supabase } from '@/lib/supabase/client'
+import { getLocalDateString } from '@/lib/utils'
 
 export default function SupervisorLeavesPage() {
   const router = useRouter()
   const [viewMode, setViewMode] = useState<'week' | 'month'>('week')
   const [currentUser, setCurrentUser] = useState<any>(null)
   const [dateStr, setDateStr] = useState('')
+  const [loading, setLoading] = useState(true)
+  const [allLeaves, setAllLeaves] = useState<any[]>([])
+  const [onLeaveTodayCount, setOnLeaveTodayCount] = useState(0)
+  const [alThisMonthCount, setAlThisMonthCount] = useState(0)
+  const [mcThisMonthCount, setMcThisMonthCount] = useState(0)
+  const [elThisMonthCount, setElThisMonthCount] = useState(0)
 
   const handleSignOut = () => {
     router.push('/')
@@ -54,16 +61,132 @@ export default function SupervisorLeavesPage() {
     fetchUser()
   }, [router])
 
+  // Fetch leaves data
+  useEffect(() => {
+    const fetchLeavesData = async () => {
+      try {
+        setLoading(true)
+
+        const { data: { user } } = await supabase.auth.getUser()
+        if (!user) return
+
+        // FETCH 1 — Get supervisor's sites
+        const { data: supervisorSites } = await supabase
+          .from('supervisor_sites')
+          .select('site_id')
+          .eq('supervisor_id', user.id)
+
+        if (!supervisorSites || supervisorSites.length === 0) {
+          setAllLeaves([])
+          setLoading(false)
+          return
+        }
+
+        const siteIds = supervisorSites.map(ss => ss.site_id)
+
+        // FETCH 2 — Get guard IDs assigned to these sites
+        const { data: assignments } = await supabase
+          .from('shift_assignments')
+          .select('guard_id')
+          .in('site_id', siteIds)
+          .eq('is_cancelled', false)
+
+        if (!assignments || assignments.length === 0) {
+          setAllLeaves([])
+          setLoading(false)
+          return
+        }
+
+        const guardIds = [...new Set(assignments.map(a => a.guard_id))]
+
+        // FETCH 3 — Get leaves for these guards
+        const { data: leaves } = await supabase
+          .from('leaves')
+          .select('id, user_id, leave_type, leave_status, leave_date, remarks, external_emp_code')
+          .in('user_id', guardIds)
+          .order('leave_date', { ascending: true })
+
+        // FETCH 4 — Get guard names
+        const { data: guards } = await supabase
+          .from('users')
+          .select('id, full_name, external_employee_code')
+          .in('id', guardIds)
+
+        // BUILD LEAVE TABLE with combined data
+        const leaveRows = (leaves || []).map(leave => {
+          const guard = guards?.find(g => g.id === leave.user_id)
+          return {
+            id: leave.id,
+            guardId: leave.user_id,
+            guardName: guard?.full_name || 'Unknown',
+            guardCode: guard?.external_employee_code || leave.external_emp_code || 'N/A',
+            leaveType: leave.leave_type,
+            leaveDate: leave.leave_date,
+            status: leave.leave_status,
+            remarks: leave.remarks || '—',
+          }
+        })
+
+        setAllLeaves(leaveRows)
+
+        // CALCULATE SUMMARY STATS from real data
+        const today = getLocalDateString()
+        const currentMonth = new Date().getMonth()
+        const currentYear = new Date().getFullYear()
+
+        const onLeaveToday = leaveRows.filter(
+          l => l.leaveDate === today && l.status === 'Approved'
+        ).length
+
+        const alThisMonth = leaveRows.filter(l => {
+          const leaveDate = new Date(l.leaveDate)
+          return l.leaveType === 'AL' && l.status === 'Approved' &&
+            leaveDate.getMonth() === currentMonth &&
+            leaveDate.getFullYear() === currentYear
+        }).length
+
+        const mcThisMonth = leaveRows.filter(l => {
+          const leaveDate = new Date(l.leaveDate)
+          return l.leaveType === 'MC' && l.status === 'Approved' &&
+            leaveDate.getMonth() === currentMonth &&
+            leaveDate.getFullYear() === currentYear
+        }).length
+
+        const elThisMonth = leaveRows.filter(l => {
+          const leaveDate = new Date(l.leaveDate)
+          return l.leaveType === 'EL' && l.status === 'Approved' &&
+            leaveDate.getMonth() === currentMonth &&
+            leaveDate.getFullYear() === currentYear
+        }).length
+
+        setOnLeaveTodayCount(onLeaveToday)
+        setAlThisMonthCount(alThisMonth)
+        setMcThisMonthCount(mcThisMonth)
+        setElThisMonthCount(elThisMonth)
+      } catch (error) {
+        console.error('[v0] Error fetching leaves:', error)
+      } finally {
+        setLoading(false)
+      }
+    }
+
+    fetchLeavesData()
+  }, [router])
+
   // Mock data for summary stats
   const summaryStats = [
-    { label: 'On leave today', value: 2, color: 'bg-amber-50 border-amber-200', textColor: 'text-amber-600' },
-    { label: 'AL this month', value: 8, color: 'bg-purple-50 border-purple-200', textColor: 'text-purple-600' },
-    { label: 'MC this month', value: 3, color: 'bg-red-50 border-red-200', textColor: 'text-red-600' },
-    { label: 'EL this month', value: 2, color: 'bg-amber-50 border-amber-200', textColor: 'text-amber-600' },
+    { label: 'On leave today', value: onLeaveTodayCount, color: 'bg-amber-50 border-amber-200', textColor: 'text-amber-600' },
+    { label: 'AL this month', value: alThisMonthCount, color: 'bg-purple-50 border-purple-200', textColor: 'text-purple-600' },
+    { label: 'MC this month', value: mcThisMonthCount, color: 'bg-red-50 border-red-200', textColor: 'text-red-600' },
+    { label: 'EL this month', value: elThisMonthCount, color: 'bg-amber-50 border-amber-200', textColor: 'text-amber-600' },
   ]
 
-  // Week data - Mon 7 to Sun 13 Apr
-  const weekStart = new Date(2026, 3, 7)
+  // Week data - Mon to Sun of current week
+  const today = new Date()
+  const currentDayOfWeek = today.getDay() || 7
+  const weekStart = new Date(today)
+  weekStart.setDate(today.getDate() - currentDayOfWeek + 1)
+  
   const days = Array.from({ length: 7 }, (_, i) => {
     const date = new Date(weekStart)
     date.setDate(date.getDate() + i)
@@ -71,71 +194,37 @@ export default function SupervisorLeavesPage() {
   })
   const dayNames = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
 
-  // Guards with leave this week
-  const guardLeaves = [
-    {
-      id: 1,
-      name: 'Nora Baharom',
-      code: 'SO0004',
-      leaves: [null, null, null, 'AL', 'AL', null, null],
-    },
-    {
-      id: 2,
-      name: 'Kamal Aizuddin',
-      code: 'SO0003',
-      leaves: [null, null, null, null, null, null, 'MC'],
-    },
-    {
-      id: 3,
-      name: 'Hafiz Daud',
-      code: 'SO0006',
-      leaves: ['EL', null, null, null, null, null, null],
-    },
-  ]
+  // Build week view data from allLeaves
+  const weekLeaves = allLeaves.filter(leave => {
+    const leaveDate = new Date(leave.leaveDate)
+    return leaveDate >= weekStart && leaveDate < new Date(weekStart.getTime() + 7 * 24 * 60 * 60 * 1000)
+  })
 
-  // Upcoming leave table
-  const upcomingLeaves = [
-    {
-      id: 1,
-      guard: 'Nora Baharom',
-      type: 'AL',
-      dates: '10-11 Apr',
-      status: 'Approved',
-      remarks: 'Annual leave',
-    },
-    {
-      id: 2,
-      guard: 'Kamal Aizuddin',
-      type: 'MC',
-      dates: '12 Apr',
-      status: 'Approved',
-      remarks: 'Medical certificate',
-    },
-    {
-      id: 3,
-      guard: 'Hafiz Daud',
-      type: 'EL',
-      dates: '13 Apr',
-      status: 'Approved',
-      remarks: 'Family emergency',
-    },
-    {
-      id: 4,
-      guard: 'Ahmad Razif',
-      type: 'AL',
-      dates: '20-22 Apr',
-      status: 'Pending',
-      remarks: '—',
-    },
-    {
-      id: 5,
-      guard: 'Siti Norizan',
-      type: 'AL',
-      dates: '25 Apr',
-      status: 'Pending',
-      remarks: '—',
-    },
-  ]
+  // Group by guard
+  const guardWeekLeaves = Array.from(
+    new Map(
+      weekLeaves.map(leave => [leave.guardId, leave])
+    ).entries()
+  ).map(([guardId, leave]) => {
+    const guardLeaves: (string | null)[] = Array(7).fill(null)
+    weekLeaves
+      .filter(l => l.guardId === guardId && l.status === 'Approved')
+      .forEach(l => {
+        const leaveDate = new Date(l.leaveDate)
+        const dayIndex = Math.floor((leaveDate.getTime() - weekStart.getTime()) / (24 * 60 * 60 * 1000))
+        if (dayIndex >= 0 && dayIndex < 7) {
+          guardLeaves[dayIndex] = l.leaveType
+        }
+      })
+
+    const sampleLeave = weekLeaves.find(l => l.guardId === guardId)
+    return {
+      guardId,
+      guardName: sampleLeave?.guardName || 'Unknown',
+      guardCode: sampleLeave?.guardCode || 'N/A',
+      leaves: guardLeaves,
+    }
+  }).sort((a, b) => a.guardName.localeCompare(b.guardName))
 
   const getLeaveColor = (type: string | null) => {
     if (type === 'AL') return 'bg-purple-100 text-purple-700'
@@ -214,6 +303,14 @@ export default function SupervisorLeavesPage() {
           </div>
         </div>
 
+        {/* Info Banner */}
+        <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-md flex items-start gap-3">
+          <AlertCircle className="w-5 h-5 text-blue-600 flex-shrink-0 mt-0.5" />
+          <p className="text-sm text-blue-700">
+            Leave approvals are managed in Info-Tech HRMS. This page displays synced data only.
+          </p>
+        </div>
+
         {/* Summary Cards */}
         <div className="grid grid-cols-4 gap-4 mb-8">
           {summaryStats.map((stat) => (
@@ -252,25 +349,33 @@ export default function SupervisorLeavesPage() {
                       </tr>
                     </thead>
                     <tbody>
-                      {guardLeaves.map((guard) => (
-                        <tr key={guard.id} className="border-b border-slate-200 hover:bg-slate-50">
-                          <td className="px-4 py-3">
-                            <div className="text-sm font-medium text-slate-900">{guard.name}</div>
-                            <div className="text-xs text-slate-500">{guard.code}</div>
+                      {guardWeekLeaves.length === 0 ? (
+                        <tr>
+                          <td colSpan={8} className="px-4 py-8 text-center text-slate-500">
+                            No leave records for this week
                           </td>
-                          {guard.leaves.map((leave, idx) => (
-                            <td key={idx} className="px-4 py-3 text-center">
-                              {leave ? (
-                                <Badge className={`${getLeaveColor(leave)} border-0 w-full`}>
-                                  {getLeaveLabel(leave)}
-                                </Badge>
-                              ) : (
-                                <div className="text-sm text-slate-300">—</div>
-                              )}
-                            </td>
-                          ))}
                         </tr>
-                      ))}
+                      ) : (
+                        guardWeekLeaves.map((guard) => (
+                          <tr key={guard.guardId} className="border-b border-slate-200 hover:bg-slate-50">
+                            <td className="px-4 py-3">
+                              <div className="text-sm font-medium text-slate-900">{guard.guardName}</div>
+                              <div className="text-xs text-slate-500">{guard.guardCode}</div>
+                            </td>
+                            {guard.leaves.map((leave, idx) => (
+                              <td key={idx} className="px-4 py-3 text-center">
+                                {leave ? (
+                                  <Badge className={`${getLeaveColor(leave)} border-0 w-full`}>
+                                    {getLeaveLabel(leave)}
+                                  </Badge>
+                                ) : (
+                                  <div className="text-sm text-slate-300">—</div>
+                                )}
+                              </td>
+                            ))}
+                          </tr>
+                        ))
+                      )}
                     </tbody>
                   </table>
                 </div>
@@ -288,38 +393,55 @@ export default function SupervisorLeavesPage() {
 
         {/* Upcoming Leave Table */}
         <div>
-          <h4 className="text-sm font-semibold text-slate-700 mb-4">Upcoming leave requests</h4>
+          <h4 className="text-sm font-semibold text-slate-700 mb-4">Leave records</h4>
           <Card className="border-slate-200 overflow-hidden">
-            <table className="w-full">
-              <thead className="bg-slate-50">
-                <tr className="border-b border-slate-200">
-                  <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700">Guard</th>
-                  <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700">Type</th>
-                  <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700">Dates</th>
-                  <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700">Status</th>
-                  <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700">Remarks</th>
-                </tr>
-              </thead>
-              <tbody>
-                {upcomingLeaves.map((leave) => (
-                  <tr key={leave.id} className="border-b border-slate-200 hover:bg-slate-50">
-                    <td className="px-4 py-3 text-sm font-medium text-slate-900">{leave.guard}</td>
-                    <td className="px-4 py-3">
-                      <Badge className={`${getLeaveColor(leave.type)} border-0`}>
-                        {leave.type}
-                      </Badge>
-                    </td>
-                    <td className="px-4 py-3 text-sm text-slate-700">{leave.dates}</td>
-                    <td className="px-4 py-3">
-                      <Badge className={`${getStatusBadgeColor(leave.status)} border-0`}>
-                        {leave.status}
-                      </Badge>
-                    </td>
-                    <td className="px-4 py-3 text-sm text-slate-700">{leave.remarks}</td>
+            {loading ? (
+              <div className="p-8 text-center text-slate-600">Loading leave records...</div>
+            ) : allLeaves.length === 0 ? (
+              <div className="p-8 text-center text-slate-600">
+                No leave records found for your guards.
+              </div>
+            ) : (
+              <table className="w-full">
+                <thead className="bg-slate-50">
+                  <tr className="border-b border-slate-200">
+                    <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700">Guard</th>
+                    <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700">Type</th>
+                    <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700">Date</th>
+                    <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700">Status</th>
+                    <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700">Remarks</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {allLeaves.map((leave) => (
+                    <tr key={leave.id} className="border-b border-slate-200 hover:bg-slate-50">
+                      <td className="px-4 py-3">
+                        <div className="text-sm font-medium text-slate-900">{leave.guardName}</div>
+                        <div className="text-xs text-slate-500">{leave.guardCode}</div>
+                      </td>
+                      <td className="px-4 py-3">
+                        <Badge className={`${getLeaveColor(leave.leaveType)} border-0`}>
+                          {leave.leaveType}
+                        </Badge>
+                      </td>
+                      <td className="px-4 py-3 text-sm text-slate-700">
+                        {new Date(leave.leaveDate).toLocaleDateString('en-MY', {
+                          year: 'numeric',
+                          month: 'short',
+                          day: 'numeric',
+                        })}
+                      </td>
+                      <td className="px-4 py-3">
+                        <Badge className={`${getStatusBadgeColor(leave.status)} border-0`}>
+                          {leave.status}
+                        </Badge>
+                      </td>
+                      <td className="px-4 py-3 text-sm text-slate-700">{leave.remarks}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
           </Card>
         </div>
       </div>
