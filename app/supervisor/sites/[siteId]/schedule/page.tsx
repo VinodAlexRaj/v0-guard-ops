@@ -138,15 +138,14 @@ export default function SchedulePage() {
       if (assignmentsError) throw assignmentsError
       console.log('[v0] Found assignments:', assignmentsData?.length || 0)
 
-  // Query 4 — get guard names (only actual guards, not supervisors/managers)
-  const guardIds = [...new Set(assignmentsData?.map(a => a.guard_id) || [])]
-  const { data: guardsData } = guardIds.length > 0
-    ? await supabase
-        .from('users')
-        .select('id, full_name, external_employee_code, external_role')
-        .in('id', guardIds)
-        .in('external_role', ['SECURITY OFFICER', 'NEPALESE SECURITY OFFICER'])
-    : { data: [] }
+      // Query 4 — get names for ALL assigned users (including non-guards for display)
+      const guardIds = [...new Set(assignmentsData?.map(a => a.guard_id) || [])]
+      const { data: guardsData } = guardIds.length > 0
+        ? await supabase
+            .from('users')
+            .select('id, full_name, external_employee_code, external_role')
+            .in('id', guardIds)
+        : { data: [] }
 
       console.log('[v0] Found guards:', guardsData?.length || 0)
 
