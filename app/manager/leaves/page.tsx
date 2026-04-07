@@ -1,43 +1,146 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
 import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
 import { LogOut, RefreshCw } from 'lucide-react'
+import { supabase } from '@/lib/supabase/client'
+import { getLocalDateString, formatLocalDate } from '@/lib/utils'
+
+interface LeaveRow {
+  id: string
+  guardName: string
+  guardCode: string
+  type: string
+  leaveDate: string
+  status: string
+  remarks: string | null
+}
 
 export default function ManagerLeavesPage() {
   const router = useRouter()
-  const todayDate = new Date(2026, 3, 10)
-  const dateStr = todayDate.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: '2-digit', year: 'numeric' })
-
   const [searchQuery, setSearchQuery] = useState('')
   const [statusFilter, setStatusFilter] = useState('All')
   const [typeFilter, setTypeFilter] = useState('All')
-  const leaveRecords = [
-    { id: 1, name: 'Nora Baharom', code: 'SO0001', type: 'AL', startDate: '10 Apr', endDate: '11 Apr', status: 'Approved' },
-    { id: 2, name: 'Kamal Aizuddin', code: 'SO0091', type: 'MC', startDate: '12 Apr', endDate: '12 Apr', status: 'Approved' },
-    { id: 3, name: 'Hafiz Daud', code: 'SO0033', type: 'EL', startDate: '13 Apr', endDate: '13 Apr', status: 'Approved' },
-    { id: 4, name: 'Ahmad Razif', code: 'SO0042', type: 'AL', startDate: '20 Apr', endDate: '22 Apr', status: 'Pending' },
-    { id: 5, name: 'Siti Norizan', code: 'SO0055', type: 'AL', startDate: '25 Apr', endDate: '25 Apr', status: 'Pending' },
-    { id: 6, name: 'Rajan Muthu', code: 'SN0078', type: 'AL', startDate: '01 May', endDate: '03 May', status: 'Pending' },
-    { id: 7, name: 'Lim Chee Hoe', code: 'SO0020', type: 'UL', startDate: '05 May', endDate: '05 May', status: 'Pending' },
-    { id: 8, name: 'Mei Ling', code: 'SO0015', type: 'MC', startDate: '28 Apr', endDate: '28 Apr', status: 'Rejected' },
-  ]
+  const [loading, setLoading] = useState(true)
+  const [dateStr, setDateStr] = useState('')
+  const [managerName, setManagerName] = useState('User')
+  const [allLeaves, setAllLeaves] = useState<LeaveRow[]>([])
+  const [pendingApproval, setPendingApproval] = useState(0)
+  const [approvedThisMonth, setApprovedThisMonth] = useState(0)
+  const [onLeaveToday, setOnLeaveToday] = useState(0)
+  const [rejectedThisMonth, setRejectedThisMonth] = useState(0)
 
   const handleSignOut = () => {
     router.push('/')
   }
 
-  const filteredRecords = leaveRecords.filter(record => {
-    const matchSearch = record.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
-                       record.code.toLowerCase().includes(searchQuery.toLowerCase())
-    const matchStatus = statusFilter === 'All' || record.status === statusFilter
-    const matchType = typeFilter === 'All' || record.type === typeFilter
-    return matchSearch && matchStatus && matchType
-  })
+  // Set date on mount
+  useEffect(() => {
+    const todayDate = new Date()
+    const formatted = todayDate.toLocaleDateString('en-US', {
+      weekday: 'short',
+      month: 'short',
+      day: '2-digit',
+      year: 'numeric',
+    })
+    setDateStr(formatted)
+  }, [])
+
+  // Fetch leave data
+  useEffect(() => {
+    const fetchLeaveData = async () => {
+      try {
+        setLoading(true)
+
+        // FETCH 1 — Get manager name
+        const { data: { user } } = await supabase.auth.getUser()
+        if (user) {
+          const { data: userData } = await supabase
+            .from('users')
+            .select('full_name')
+            .eq('id', user.id)
+            .single()
+          if (userData?.full_name) setManagerName(userData.full_name)
+        }
+
+        // FETCH 2 — Get all leaves
+        const { data: leaves } = await supabase
+          .from('leaves')
+          .select('id, user_id, external_emp_code, leave_type, leave_status, leave_date, remarks')
+          .order('leave_date', { ascending: false })
+
+        if (!leaves || leaves.length === 0) {
+          setLoading(false)
+          return
+        }
+
+        // FETCH 3 — Get guard names
+        const userIds = [...new Set(leaves.map(l => l.user_id))]
+        const { data: guards } = await supabase
+          .from('users')
+          .select('id, full_name, external_employee_code')
+          .in('id', userIds)
+
+        // BUILD TABLE ROWS
+        const guardMap = new Map((guards || []).map(g => [g.id, g]))
+
+        const rows: LeaveRow[] = (leaves || []).map(leave => ({
+          id: leave.id,
+          guardName: guardMap.get(leave.user_id)?.full_name || 'Unknown',
+          guardCode: leave.external_emp_code || 'N/A',
+          type: leave.leave_type,
+          leaveDate: formatLocalDate(leave.leave_date),
+          status: leave.leave_status,
+          remarks: leave.remarks,
+        }))
+
+        setAllLeaves(rows)
+
+        // CALCULATE SUMMARY STATS
+        const today = getLocalDateString()
+        const currentMonth = today.substring(0, 7) // YYYY-MM format
+
+        const pending = (leaves || []).filter(l => l.leave_status === 'Pending').length
+        const approved = (leaves || []).filter(
+          l => l.leave_status === 'Approved' && l.leave_date.startsWith(currentMonth)
+        ).length
+        const today_leaves = (leaves || []).filter(
+          l => l.leave_date === today && l.leave_status === 'Approved'
+        ).length
+        const rejected = (leaves || []).filter(
+          l => l.leave_status === 'Rejected' && l.leave_date.startsWith(currentMonth)
+        ).length
+
+        setPendingApproval(pending)
+        setApprovedThisMonth(approved)
+        setOnLeaveToday(today_leaves)
+        setRejectedThisMonth(rejected)
+      } catch (error) {
+        console.error('[v0] Error fetching leave data:', error)
+      } finally {
+        setLoading(false)
+      }
+    }
+
+    fetchLeaveData()
+  }, [router])
+
+  // Filter leaves
+  const filteredRecords = useMemo(() => {
+    return allLeaves.filter(record => {
+      const matchSearch =
+        !searchQuery ||
+        record.guardName.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        record.guardCode.toLowerCase().includes(searchQuery.toLowerCase())
+      const matchStatus = statusFilter === 'All' || record.status === statusFilter
+      const matchType = typeFilter === 'All' || record.type === typeFilter
+      return matchSearch && matchStatus && matchType
+    })
+  }, [allLeaves, searchQuery, statusFilter, typeFilter])
 
   const getTypeColor = (type: string) => {
     switch(type) {
@@ -66,7 +169,7 @@ export default function ManagerLeavesPage() {
           <div className="text-sm text-slate-600">{dateStr}</div>
           <div className="flex items-center gap-4">
             <div className="text-right">
-              <p className="text-sm font-medium text-slate-900">Vinod Alex Raj</p>
+              <p className="text-sm font-medium text-slate-900">{managerName}</p>
               <Badge variant="secondary" className="mt-1">
                 Manager
               </Badge>
@@ -90,6 +193,26 @@ export default function ManagerLeavesPage() {
         <div className="mb-8">
           <h1 className="text-3xl font-bold text-slate-900 mb-2">Leave Management</h1>
           <p className="text-slate-600">Review and manage all leave requests</p>
+        </div>
+
+        {/* Summary Cards */}
+        <div className="grid grid-cols-4 gap-4 mb-6">
+          <Card className="p-4 border-slate-200">
+            <p className="text-xs text-slate-600 mb-1">Pending approval</p>
+            <p className="text-2xl font-bold text-amber-600">{pendingApproval}</p>
+          </Card>
+          <Card className="p-4 border-slate-200">
+            <p className="text-xs text-slate-600 mb-1">Approved this month</p>
+            <p className="text-2xl font-bold text-green-600">{approvedThisMonth}</p>
+          </Card>
+          <Card className="p-4 border-slate-200">
+            <p className="text-xs text-slate-600 mb-1">On leave today</p>
+            <p className="text-2xl font-bold text-blue-600">{onLeaveToday}</p>
+          </Card>
+          <Card className="p-4 border-slate-200">
+            <p className="text-xs text-slate-600 mb-1">Rejected this month</p>
+            <p className="text-2xl font-bold text-red-600">{rejectedThisMonth}</p>
+          </Card>
         </div>
 
         {/* Search and Filters */}
@@ -158,44 +281,52 @@ export default function ManagerLeavesPage() {
 
         {/* Leave Requests Table */}
         <Card className="border-slate-200 overflow-hidden mb-6">
-          <table className="w-full">
-            <thead className="bg-slate-50">
-              <tr className="border-b border-slate-200">
-                <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700">Guard</th>
-                <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700">Type</th>
-                <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700">Date</th>
-                <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700">Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filteredRecords.map((record) => (
-                <tr
-                  key={record.id}
-                  className="border-b border-slate-200 hover:bg-slate-50"
-                >
-                  <td className="px-4 py-3">
-                    <div className="text-sm font-medium text-slate-900">{record.name}</div>
-                    <div className="text-xs text-slate-600">{record.code}</div>
-                  </td>
-                  <td className="px-4 py-3">
-                    <Badge className={`${getTypeColor(record.type)} border-0`}>
-                      {record.type}
-                    </Badge>
-                  </td>
-                  <td className="px-4 py-3">
-                    <span className="text-sm text-slate-900">
-                      {record.startDate === record.endDate ? record.startDate : `${record.startDate} - ${record.endDate}`}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3">
-                    <Badge className={`${getStatusColor(record.status)} border-0`}>
-                      {record.status}
-                    </Badge>
-                  </td>
+          {loading ? (
+            <div className="p-8 text-center text-slate-600">Loading leave data...</div>
+          ) : filteredRecords.length === 0 ? (
+            <div className="p-8 text-center text-slate-600">No leave requests found.</div>
+          ) : (
+            <table className="w-full">
+              <thead className="bg-slate-50">
+                <tr className="border-b border-slate-200">
+                  <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700">Guard</th>
+                  <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700">Type</th>
+                  <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700">Date</th>
+                  <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700">Status</th>
+                  <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700">Remarks</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {filteredRecords.map((record) => (
+                  <tr
+                    key={record.id}
+                    className="border-b border-slate-200 hover:bg-slate-50"
+                  >
+                    <td className="px-4 py-3">
+                      <div className="text-sm font-medium text-slate-900">{record.guardName}</div>
+                      <div className="text-xs text-slate-600">{record.guardCode}</div>
+                    </td>
+                    <td className="px-4 py-3">
+                      <Badge className={`${getTypeColor(record.type)} border-0`}>
+                        {record.type}
+                      </Badge>
+                    </td>
+                    <td className="px-4 py-3">
+                      <span className="text-sm text-slate-900">{record.leaveDate}</span>
+                    </td>
+                    <td className="px-4 py-3">
+                      <Badge className={`${getStatusColor(record.status)} border-0`}>
+                        {record.status}
+                      </Badge>
+                    </td>
+                    <td className="px-4 py-3">
+                      <span className="text-sm text-slate-600">{record.remarks || '—'}</span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
         </Card>
 
         {/* Sync Section */}
