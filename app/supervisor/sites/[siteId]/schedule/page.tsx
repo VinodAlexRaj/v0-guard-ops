@@ -29,6 +29,7 @@ export default function SchedulePage() {
   const [siteUUID, setSiteUUID] = useState<string | null>(null)
   const [coverageData, setCoverageData] = useState<number[]>([100, 100, 100, 100, 100, 100, 100])
   const [guardShiftCounts, setGuardShiftCounts] = useState<Map<string, Map<string, number>>>(new Map()) // Map<dateStr, Map<guardId, count>>
+  const [guardLeave, setGuardLeave] = useState<any[]>([])
 
   // Ref to maintain persistent reference to slots data
   const slotsRef = useRef<any[]>([])
@@ -146,12 +147,23 @@ export default function SchedulePage() {
 
       console.log('[v0] Found guards:', guardsData?.length || 0)
 
+      // Query 5 — get guard leave records for this week
+      const { data: leaveData } = await supabase
+        .from('guard_leave_records')
+        .select('id, guard_id, leave_start_date, leave_end_date, status')
+        .gte('leave_end_date', '2026-04-07')
+        .lte('leave_start_date', '2026-04-13')
+        .eq('status', 'approved')
+
+      console.log('[v0] Found leave records:', leaveData?.length || 0)
+
       // Update state with separate data
       slotsRef.current = slotsData
       setSlots(slotsData)
       setShiftDefs(shiftDefsData || [])
       setAssignments(assignmentsData || [])
       setGuardNames(guardsData || [])
+      setGuardLeave(leaveData || [])
 
       // Calculate guard shift counts per day for shift overload warnings
       calculateGuardShiftCounts(assignmentsData || [], slotsData)
@@ -180,6 +192,20 @@ export default function SchedulePage() {
     })
 
     setGuardShiftCounts(countMap)
+  }
+
+  function getShiftNameForAssignment(assignmentId: string): string | null {
+    // Find the assignment
+    const assignment = assignments.find(a => a.id === assignmentId)
+    if (!assignment) return null
+
+    // Find the slot
+    const slot = slotsRef.current.find(s => s.id === assignment.roster_slot_id)
+    if (!slot) return null
+
+    // Find the shift definition
+    const shiftDef = shiftDefs.find(sd => sd.id === slot.shift_definition_id)
+    return shiftDef?.shift_name || null
   }
 
   async function fetchGuards() {
@@ -767,9 +793,17 @@ export default function SchedulePage() {
                             return !isAlreadyAssignedToThisSlot
                           })
                           .map((guard) => {
-                            // Check if guard is assigned to a DIFFERENT slot today
                             const dateStr = selectedSlot ? new Date(selectedSlot.shift_date).toISOString().split('T')[0] : null
-                            const isAssignedToOtherSlotToday = dateStr && assignments.some(a => {
+                            
+                            // Check if guard is on approved leave on this date
+                            const isOnLeave = dateStr && guardLeave.some(leave => {
+                              const leaveStart = new Date(leave.leave_start_date).toISOString().split('T')[0]
+                              const leaveEnd = new Date(leave.leave_end_date).toISOString().split('T')[0]
+                              return guard.id === leave.guard_id && dateStr >= leaveStart && dateStr <= leaveEnd
+                            })
+                            
+                            // Check if guard is assigned to a DIFFERENT slot today
+                            const assignmentOnOtherSlotToday = dateStr && assignments.find(a => {
                               const slotDate = slotsRef.current.find(s => s.id === a.roster_slot_id)?.shift_date
                               const assignmentDateStr = slotDate ? new Date(slotDate).toISOString().split('T')[0] : null
                               return a.guard_id === guard.id && 
@@ -777,7 +811,9 @@ export default function SchedulePage() {
                                      a.roster_slot_id !== selectedSlot?.id
                             })
                             
-                            const isDisabled = guard.status !== 'available' || isAssignedToOtherSlotToday
+                            const shiftNameForBadge = assignmentOnOtherSlotToday ? getShiftNameForAssignment(assignmentOnOtherSlotToday.id) : null
+                            
+                            const isDisabled = isOnLeave
                             const isSelected = selectedGuard?.id === guard.id
                             return (
                               <button
@@ -792,13 +828,18 @@ export default function SchedulePage() {
                                       : 'bg-slate-50 text-slate-700 hover:bg-slate-100 border border-slate-200'
                                 }`}
                               >
-                                <div className="flex items-center justify-between">
+                                <div className="flex items-center justify-between gap-2">
                                   <span>{guard.full_name}</span>
-                                  {isAssignedToOtherSlotToday ? (
-                                    <span className="text-xs text-slate-500">(on another shift)</span>
-                                  ) : guard.status !== 'available' && (
-                                    <span className="text-xs text-slate-500">({guard.status})</span>
-                                  )}
+                                  <div className="flex items-center gap-2">
+                                    {shiftNameForBadge && !isDisabled && (
+                                      <Badge className="bg-teal-500 text-white text-xs">
+                                        Assigned: {shiftNameForBadge}
+                                      </Badge>
+                                    )}
+                                    {isOnLeave && (
+                                      <span className="text-xs text-red-600">(on leave)</span>
+                                    )}
+                                  </div>
                                 </div>
                               </button>
                             )
