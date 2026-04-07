@@ -77,10 +77,10 @@ export default function SupervisorOverviewPage() {
         const siteIds = supervisorSites.map(ss => ss.site_id)
         const today = new Date().toISOString().split('T')[0]
 
-        // FETCH 2 — Get today's roster coverage
+        // FETCH 2 — Get today's roster coverage with shift details
         const { data: coverage } = await supabase
           .from('roster_coverage')
-          .select('site_id, assigned, required_headcount, is_fulfilled, shift_date')
+          .select('site_id, shift_definition_id, assigned, required_headcount, is_fulfilled, shift_date')
           .in('site_id', siteIds)
           .eq('shift_date', today)
 
@@ -125,7 +125,7 @@ export default function SupervisorOverviewPage() {
         coverage?.forEach(cov => {
           const site = Array.from(sitesMap.values()).find(s => s.id === cov.site_id)
           if (site) {
-            const shiftDef = shiftDefs?.find(sd => sd.id === cov.shift_id)
+            const shiftDef = shiftDefs?.find(sd => sd.id === cov.shift_definition_id)
             const status = cov.is_fulfilled ? 'filled' : cov.assigned > 0 ? 'partial' : 'gap'
             site.shifts.push({
               name: shiftDef?.shift_name || 'Unknown',
