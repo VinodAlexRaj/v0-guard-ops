@@ -60,7 +60,9 @@ export default function SchedulePage() {
     return date
   })
 
-  const dayNames = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
+  const dayNames = days.map(date =>
+    date.toLocaleDateString('en-US', { weekday: 'short' })
+  )
 
   // Initialize and fetch schedule data from Supabase
   useEffect(() => {

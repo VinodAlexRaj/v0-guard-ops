@@ -287,10 +287,10 @@ export default function AttendancePage() {
   const withOTCount = filteredData.filter((r) => r.otMins > 0).length
 
   const todayDate = new Date()
-  const dateStr = todayDate.toLocaleDateString('en-US', {
+  const dateStr = todayDate.toLocaleDateString('en-MY', {
     weekday: 'short',
+    day: 'numeric',
     month: 'short',
-    day: '2-digit',
     year: 'numeric',
   })
 
