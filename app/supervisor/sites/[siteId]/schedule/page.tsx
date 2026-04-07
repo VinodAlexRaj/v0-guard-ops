@@ -254,18 +254,44 @@ export default function SchedulePage() {
     if (!selectedSlot || !selectedGuard || !siteUUID) return
 
     try {
-      // Debug: Log what we're looking for
-      console.log('[v0] saveAssignment called')
-      console.log('[v0] slotsRef.current length:', slotsRef.current.length)
-      console.log('[v0] looking for slot id:', selectedSlot?.id)
-      console.log('[v0] slots ids:', slotsRef.current.map(s => s.id))
-
       // Find the full slot data from the slotsRef using selectedSlot.id
       const fullSlot = slotsRef.current.find(s => s.id === selectedSlot.id)
 
       if (!fullSlot) {
-        console.error('[v0] Could not find slot data in slotsRef')
         alert('Could not find slot data')
+        return
+      }
+
+      // Check if this guard already has a non-cancelled assignment for this exact slot
+      const { data: existingAssignment } = await supabase
+        .from('shift_assignments')
+        .select('id')
+        .eq('roster_slot_id', fullSlot.id)
+        .eq('guard_id', selectedGuard.id)
+        .eq('is_cancelled', false)
+        .single()
+
+      if (existingAssignment) {
+        // Guard already assigned to this slot - nothing to do
+        alert('This guard is already assigned to this slot.')
+        setSelectedGuard(null)
+        setSearchQuery('')
+        return
+      }
+
+      // Check if this guard has any overlapping assignment at this time (different slot)
+      const { data: overlappingAssignment } = await supabase
+        .from('shift_assignments')
+        .select('id')
+        .eq('guard_id', selectedGuard.id)
+        .eq('is_cancelled', false)
+        .lte('start_time', fullSlot.end_time)
+        .gte('end_time', fullSlot.start_time)
+        .neq('roster_slot_id', fullSlot.id)
+        .limit(1)
+
+      if (overlappingAssignment && overlappingAssignment.length > 0) {
+        alert('This guard is already assigned to another shift at this time.')
         return
       }
 
