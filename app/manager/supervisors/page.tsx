@@ -190,9 +190,6 @@ export default function ManagerSupervisorsPage() {
       .toUpperCase()
   }
 
-  const todayDate = new Date(2026, 3, 10) // April 10, 2026
-  const dateStr = todayDate.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: '2-digit', year: 'numeric' })
-
   return (
     <>
       {/* Top Navigation */}
