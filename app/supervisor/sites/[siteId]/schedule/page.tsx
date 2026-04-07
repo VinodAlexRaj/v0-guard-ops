@@ -8,6 +8,7 @@ import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
 import { LogOut, ChevronLeft, ChevronRight } from 'lucide-react'
 import { supabase } from '@/lib/supabase/client'
+import { getLocalDateString } from '@/lib/utils'
 
 export default function SchedulePage() {
   const router = useRouter()
@@ -711,9 +712,9 @@ export default function SchedulePage() {
                               const isToday = day.getTime() === today.getTime()
                               const isSelected = selectedCell.shiftIndex === shiftIdx && selectedCell.dayIndex === dayIdx
                               const targetShiftCode = shifts[shiftIdx]?.code
-                              const dayStr = day.toISOString().split('T')[0]
+                              const dayStr = getLocalDateString(day)
                               const slot = slotsRef.current.find(s => {
-                                const slotDate = new Date(s.shift_date).toISOString().split('T')[0]
+                                const slotDate = getLocalDateString(new Date(s.shift_date))
                                 const shiftDef = shiftDefs.find(sd => sd.id === s.shift_definition_id)
                                 return slotDate === dayStr && shiftDef?.shift_code?.startsWith(targetShiftCode)
                               })
@@ -734,7 +735,7 @@ export default function SchedulePage() {
                                 >
                                   <div className="space-y-1">
                                     {cells.map((cell, cellIdx) => {
-                                      const dateStr = day.toISOString().split('T')[0]
+                                      const dateStr = getLocalDateString(day)
                                       const guardMap = guardShiftCounts.get(dateStr) || new Map()
                                       const guardId = cell[2] ? assignments.find(a => a.id === cell[2])?.guard_id : null
                                       const shiftCount = guardId ? (guardMap.get(guardId) || 1) : 1
@@ -764,11 +765,11 @@ export default function SchedulePage() {
               /* Day View */
               <div className="space-y-3">
                 {shifts.map((shift, shiftIdx) => {
-                  const dayStr = dayViewDate.toISOString().split('T')[0]
-                  const dayIdx = days.findIndex(d => d.toISOString().split('T')[0] === dayStr)
+                  const dayStr = getLocalDateString(dayViewDate)
+                  const dayIdx = days.findIndex(d => getLocalDateString(d) === dayStr)
                   const targetShiftCode = shift.code
                   const slot = slotsRef.current.find(s => {
-                    const slotDate = new Date(s.shift_date).toISOString().split('T')[0]
+                    const slotDate = getLocalDateString(new Date(s.shift_date))
                     const shiftDef = shiftDefs.find(sd => sd.id === s.shift_definition_id)
                     return slotDate === dayStr && shiftDef?.shift_code?.startsWith(targetShiftCode)
                   })
@@ -943,19 +944,19 @@ export default function SchedulePage() {
                             return !isAlreadyAssignedToThisSlot
                           })
                           .map((guard) => {
-                            const dateStr = selectedSlot ? new Date(selectedSlot.shift_date).toISOString().split('T')[0] : null
+                            const dateStr = selectedSlot ? getLocalDateString(new Date(selectedSlot.shift_date)) : null
                             
                             // Check if guard is on approved leave on this date
                             const isOnLeave = dateStr && guardLeave.some(leave => {
-                              const leaveStart = new Date(leave.leave_start_date).toISOString().split('T')[0]
-                              const leaveEnd = new Date(leave.leave_end_date).toISOString().split('T')[0]
+                              const leaveStart = getLocalDateString(new Date(leave.leave_start_date))
+                              const leaveEnd = getLocalDateString(new Date(leave.leave_end_date))
                               return guard.id === leave.guard_id && dateStr >= leaveStart && dateStr <= leaveEnd
                             })
                             
                             // Check if guard is assigned to a DIFFERENT slot today
                             const assignmentOnOtherSlotToday = dateStr && assignments.find(a => {
                               const slotDate = slotsRef.current.find(s => s.id === a.roster_slot_id)?.shift_date
-                              const assignmentDateStr = slotDate ? new Date(slotDate).toISOString().split('T')[0] : null
+                              const assignmentDateStr = slotDate ? getLocalDateString(new Date(slotDate)) : null
                               return a.guard_id === guard.id && 
                                      assignmentDateStr === dateStr && 
                                      a.roster_slot_id !== selectedSlot?.id

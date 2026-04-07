@@ -15,6 +15,7 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { LogOut, AlertCircle, PieChart } from 'lucide-react'
+import { getLocalDateString } from '@/lib/utils'
 
 interface SiteRow {
   code: string
@@ -106,7 +107,7 @@ export default function SupervisorOverviewPage() {
 
         // STEP 2 — Fetch today's coverage and shift definitions
         const siteIds = supervisorSites.map(ss => ss.site_id)
-        const today = new Date().toISOString().split('T')[0]
+        const today = getLocalDateString()
 
         const { data: coverage } = await supabase
           .from('roster_coverage')

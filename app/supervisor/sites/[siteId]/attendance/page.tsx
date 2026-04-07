@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
 import { LogOut, ChevronLeft, CheckCircle2 } from 'lucide-react'
+import { getLocalDateString } from '@/lib/utils'
 
 interface AttendanceRow {
   id: string
@@ -85,7 +86,7 @@ export default function AttendancePage() {
         }
 
         // 3. Get roster slots for today
-        const today = new Date().toISOString().split('T')[0]
+        const today = getLocalDateString()
         const { data: slots } = await supabase
           .from('roster_slots')
           .select('id, shift_definition_id, start_time, end_time')
