@@ -45,7 +45,6 @@ export default function ManagerGuardsPage() {
   const [activeGuards, setActiveGuards] = useState(0)
   const [onLeaveGuards, setOnLeaveGuards] = useState(0)
   const [inactiveGuards, setInactiveGuards] = useState(0)
-  const [totalSupervisors, setTotalSupervisors] = useState(0)
 
   const handleSignOut = () => {
     router.push('/')
@@ -80,14 +79,13 @@ export default function ManagerGuardsPage() {
           if (userData?.full_name) setManagerName(userData.full_name)
         }
 
-        // FETCH 2 — Get all guards and supervisors
+        // FETCH 2 — Get all guards (no supervisors)
         const { data: staffData } = await supabase
           .from('users')
           .select('id, full_name, external_employee_code, external_role, is_active, created_at')
           .in('external_role', [
             'SECURITY OFFICER',
             'NEPALESE SECURITY OFFICER',
-            'OPERATIONS EXECUTIVE',
           ])
           .order('full_name')
 
@@ -120,20 +118,16 @@ export default function ManagerGuardsPage() {
         const leaveData = leavesData || []
 
         const rows: GuardRow[] = (staffData || []).map(staff => {
-          // Find supervisor for this guard
+          // Find supervisor for this guard via site assignments
           let supervisor: string | null = null
-          if (staff.external_role !== 'OPERATIONS EXECUTIVE') {
-            // Find which sites this guard is assigned to
-            const guardSiteIds = assignData
-              .filter(a => a.guard_id === staff.id)
-              .map(a => a.site_id)
+          const guardSiteIds = assignData
+            .filter(a => a.guard_id === staff.id)
+            .map(a => a.site_id)
 
-            // Find supervisor for one of these sites
-            if (guardSiteIds.length > 0) {
-              const supAssignment = supSiteData.find(ss => guardSiteIds.includes(ss.site_id))
-              if (supAssignment?.users) {
-                supervisor = supAssignment.users.full_name
-              }
+          if (guardSiteIds.length > 0) {
+            const supAssignment = supSiteData.find(ss => guardSiteIds.includes(ss.site_id))
+            if (supAssignment?.users) {
+              supervisor = supAssignment.users.full_name
             }
           }
 
@@ -168,29 +162,16 @@ export default function ManagerGuardsPage() {
 
         setAllStaff(rows)
 
-        // Calculate summary stats
-        const guards = rows.filter(r =>
-          r.role === 'SECURITY OFFICER' || r.role === 'NEPALESE SECURITY OFFICER'
-        )
-        const active = guards.filter(r => r.status === 'Active').length
-        const onLeave = guards.filter(r => r.status === 'On leave').length
-        const inactive = guards.filter(r => r.status === 'Inactive').length
-        const supervisors = rows.filter(r => r.role === 'OPERATIONS EXECUTIVE').length
+        // Calculate summary stats (all rows are guards now)
+        setTotalGuards(rows.length)
+        setActiveGuards(rows.filter(r => r.status === 'Active').length)
+        setOnLeaveGuards(rows.filter(r => r.status === 'On leave').length)
+        setInactiveGuards(rows.filter(r => r.status === 'Inactive').length)
 
-        setTotalGuards(guards.length)
-        setActiveGuards(active)
-        setOnLeaveGuards(onLeave)
-        setInactiveGuards(inactive)
-        setTotalSupervisors(supervisors)
-
-        // Extract unique supervisors
+        // Extract unique supervisors for filter
         const uniqueSupervisors = [
           'All',
-          ...new Set(
-            rows
-              .filter(r => r.supervisor && r.role !== 'OPERATIONS EXECUTIVE')
-              .map(r => r.supervisor)
-          ),
+          ...new Set(rows.filter(r => r.supervisor).map(r => r.supervisor)),
         ]
         setSupervisors(uniqueSupervisors as string[])
       } catch (error) {
@@ -277,7 +258,7 @@ export default function ManagerGuardsPage() {
         <div className="mb-8 flex items-center justify-between">
           <div>
             <h3 className="text-lg font-bold text-slate-900 mb-1">Guard Management</h3>
-            <p className="text-sm text-slate-600">{totalGuards} guards and {totalSupervisors} supervisors</p>
+            <p className="text-sm text-slate-600">{totalGuards} guards across your sites</p>
           </div>
           <Input
             type="text"
@@ -314,7 +295,7 @@ export default function ManagerGuardsPage() {
           <div className="flex items-center gap-3">
             <span className="text-sm font-medium text-slate-700 min-w-max">Role:</span>
             <div className="flex gap-2 flex-wrap">
-              {['All', 'SECURITY OFFICER', 'NEPALESE SECURITY OFFICER', 'OPERATIONS EXECUTIVE'].map((role) => (
+              {['All', 'SECURITY OFFICER', 'NEPALESE SECURITY OFFICER'].map((role) => (
                 <button
                   key={role}
                   onClick={() => setRoleFilter(role)}
@@ -444,7 +425,7 @@ export default function ManagerGuardsPage() {
         </Card>
 
         {/* Footer */}
-        <div className="mt-4 text-sm text-slate-600">Showing {filteredGuards.filter(g => g.role === 'SECURITY OFFICER' || g.role === 'NEPALESE SECURITY OFFICER').length} of {totalGuards} guards</div>
+        <div className="mt-4 text-sm text-slate-600">Showing {filteredGuards.length} of {totalGuards} guards</div>
       </div>
 
       {/* Edit Modal */}
