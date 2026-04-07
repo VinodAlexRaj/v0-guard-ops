@@ -354,6 +354,6 @@ export default function ManagerOverviewPage() {
             </div>
           </>
         )}
-      </>
-    )
-  }
+      </div>
+    </>
+  )
