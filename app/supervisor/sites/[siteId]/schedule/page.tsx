@@ -341,7 +341,7 @@ export default function SchedulePage() {
     assignments.forEach((assignment: any) => {
       const slot = slotMap.get(assignment.roster_slot_id)
       if (!slot) {
-        console.log('[v0] ❌ No slot found for assignment:', assignment.roster_slot_id)
+        console.log('[v0] �� No slot found for assignment:', assignment.roster_slot_id)
         return
       }
 
@@ -453,7 +453,11 @@ export default function SchedulePage() {
     const dayIndex = selectedCell.dayIndex
     // Get required from the actual slot if available, otherwise use hardcoded
     const required = selectedSlot ? getRequiredHeadcountForSlot(selectedSlot.id) : shifts[shiftIndex].required
-    const filled = getAssignedCount(shiftIndex, dayIndex)
+    // Count actual assignments from database for the selected slot (more accurate than grid-based count)
+    // This ensures we count ALL assignments including those from non-guard users
+    const filled = selectedSlot 
+      ? assignments.filter(a => a.roster_slot_id === selectedSlot.id).length
+      : getAssignedCount(shiftIndex, dayIndex)
     const date = days[dayIndex]
     const dateStr = date.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: '2-digit' })
     return {
