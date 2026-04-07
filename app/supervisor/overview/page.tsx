@@ -109,11 +109,17 @@ export default function SupervisorOverviewPage() {
         const siteIds = supervisorSites.map(ss => ss.site_id)
         const today = getLocalDateString()
 
-        const { data: coverage } = await supabase
+        console.log('[v0] TODAY DATE:', today)
+        console.log('[v0] SITE IDS:', siteIds)
+
+        const { data: coverage, error: coverageError } = await supabase
           .from('roster_coverage')
           .select('site_id, shift_definition_id, assigned, required_headcount, is_fulfilled')
           .in('site_id', siteIds)
           .eq('shift_date', today)
+
+        console.log('[v0] COVERAGE RESULT:', JSON.stringify(coverage))
+        console.log('[v0] COVERAGE ERROR:', coverageError)
 
         const { data: shiftDefs } = await supabase
           .from('shift_definitions')
@@ -182,6 +188,14 @@ export default function SupervisorOverviewPage() {
         })
 
         setSitesData(siteRows)
+
+        console.log('[v0] SITE ROWS:', JSON.stringify(siteRows.map(s => ({
+          code: s.code,
+          totalRequired: s.totalRequired,
+          totalAssigned: s.totalAssigned,
+          openSlots: s.openSlots,
+          fillRate: s.fillRate
+        }))))
 
         // STEP 5 — Calculate stat cards from siteRows (after all numeric calculations are done)
         const calcSitesWithGaps = siteRows.filter(s => s.openSlots > 0).length
