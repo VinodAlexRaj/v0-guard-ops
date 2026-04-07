@@ -18,6 +18,7 @@ import { LogOut, AlertCircle, PieChart } from 'lucide-react'
 
 interface SiteData {
   code: string
+  name: string
   id: string
   shifts: Array<{ name: string; status: 'gap' | 'partial' | 'filled' }>
   fillRate: number
@@ -114,6 +115,7 @@ export default function SupervisorOverviewPage() {
           const siteCode = ss.sites?.site_code || 'Unknown'
           sitesMap.set(siteCode, {
             code: siteCode,
+            name: siteCode, // Use site code as name since we don't have a dedicated name field
             id: ss.site_id,
             shifts: [],
             fillRate: 0,
@@ -121,33 +123,37 @@ export default function SupervisorOverviewPage() {
           })
         })
 
-        // Add coverage data and calculate fill rates
-        coverage?.forEach(cov => {
-          const site = Array.from(sitesMap.values()).find(s => s.id === cov.site_id)
-          if (site) {
-            const shiftDef = shiftDefs?.find(sd => sd.id === cov.shift_definition_id)
-            const status = cov.is_fulfilled ? 'filled' : cov.assigned > 0 ? 'partial' : 'gap'
-            site.shifts.push({
-              name: shiftDef?.shift_name || 'Unknown',
-              status,
-            })
-            site.openSlots += Math.max(0, cov.required_headcount - cov.assigned)
-          }
+        // Build shifts array for each site with today's coverage status
+        sitesMap.forEach(site => {
+          const siteDefs = shiftDefs?.filter(sd => sd.site_id === site.id) || []
+          siteDefs.forEach(shiftDef => {
+            const covRow = coverage?.find(c => c.site_id === site.id && c.shift_definition_id === shiftDef.id)
+            if (covRow) {
+              // Coverage exists - check if fulfilled
+              const status = covRow.is_fulfilled ? 'filled' : covRow.assigned > 0 ? 'partial' : 'gap'
+              site.shifts.push({
+                name: shiftDef.shift_name,
+                status,
+              })
+            } else {
+              // No coverage row - show as partial (no slots assigned)
+              site.shifts.push({
+                name: shiftDef.shift_name,
+                status: 'partial',
+              })
+            }
+          })
         })
 
-        // Calculate fill rates
-        coverage?.forEach(cov => {
-          const site = Array.from(sitesMap.values()).find(s => s.id === cov.site_id)
-          if (site) {
-            const totalRequired = coverage
-              .filter(c => c.site_id === cov.site_id)
-              .reduce((sum, c) => sum + (c.required_headcount || 0), 0)
-            const totalAssigned = coverage
-              .filter(c => c.site_id === cov.site_id)
-              .reduce((sum, c) => sum + (c.assigned || 0), 0)
-            if (totalRequired > 0) {
-              site.fillRate = Math.round((totalAssigned / totalRequired) * 100)
-            }
+        // Calculate open slots and fill rates per site
+        sitesMap.forEach(site => {
+          const siteCoverage = coverage?.filter(c => c.site_id === site.id) || []
+          const totalRequired = siteCoverage.reduce((sum, c) => sum + (c.required_headcount || 0), 0)
+          const totalAssigned = siteCoverage.reduce((sum, c) => sum + (c.assigned || 0), 0)
+          
+          site.openSlots = Math.max(0, totalRequired - totalAssigned)
+          if (totalRequired > 0) {
+            site.fillRate = Math.round((totalAssigned / totalRequired) * 100)
           }
         })
 
@@ -337,7 +343,7 @@ export default function SupervisorOverviewPage() {
                     {getFilteredSites().map((site, idx) => (
                       <TableRow key={idx} className="border-slate-200 hover:bg-slate-50">
                         <TableCell className="font-medium text-slate-900">{site.code}</TableCell>
-                        <TableCell className="text-slate-900">{site.code}</TableCell>
+                        <TableCell className="text-slate-900">{site.name}</TableCell>
                         <TableCell>
                           <div className="flex gap-2">
                             {site.shifts.map((shift, sidx) => (
@@ -353,8 +359,8 @@ export default function SupervisorOverviewPage() {
                           </Badge>
                         </TableCell>
                         <TableCell>
-                          {site.openSlots === 0 ? (
-                            <span className="text-slate-500">Filled</span>
+                          {site.fillRate === 100 ? (
+                            <span className="text-green-600 font-medium">Filled</span>
                           ) : (
                             <span className="text-red-600 font-medium">{site.openSlots} open</span>
                           )}
