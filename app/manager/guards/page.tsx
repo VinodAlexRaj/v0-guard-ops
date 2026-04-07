@@ -242,14 +242,6 @@ export default function ManagerGuardsPage() {
     return 'bg-teal-100 text-teal-700'
   }
 
-  const todayDate = new Date(2026, 3, 10)
-  const dateStr = todayDate.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: '2-digit', year: 'numeric' })
-
-  const totalGuards = 300
-  const activeGuards = 285
-  const onLeaveGuards = 12
-  const inactiveGuards = 15
-
   return (
     <>
       {/* Top Navigation */}
