@@ -223,10 +223,38 @@ export default function AttendancePage() {
     if (!row) return
 
     try {
-      // Build full ISO timestamps by combining today's date with the time
+      // Map display status to database status values
+      const statusMap: Record<string, string> = {
+        'on_time': 'on_time',
+        'On time': 'on_time',
+        'late': 'late',
+        'Late': 'late',
+        'absent': 'absent',
+        'Absent': 'absent',
+        'MC': 'mc',
+        'AL': 'al',
+        'EL': 'el',
+        'UL': 'ul',
+      }
+
+      // Build full ISO timestamps with Malaysia timezone (+08:00)
       const today = getLocalDateString()
-      const checkInTimestamp = row.checkIn ? `${today}T${row.checkIn}:00` : null
-      const checkOutTimestamp = row.checkOut ? `${today}T${row.checkOut}:00` : null
+      const checkInTimestamp = row.checkIn ? `${today}T${row.checkIn}:00+08:00` : null
+      const checkOutTimestamp = row.checkOut ? `${today}T${row.checkOut}:00+08:00` : null
+      
+      // Get the database status value, default to 'on_time'
+      const dbStatus = row.status ? (statusMap[row.status] || 'on_time') : 'on_time'
+
+      console.log('[v0] SAVE PAYLOAD:', {
+        shift_assignment_id: row.assignmentId,
+        check_in_time: checkInTimestamp,
+        check_out_time: checkOutTimestamp,
+        status: dbStatus,
+        remarks: row.remarks,
+        overtime_minutes: row.otMins,
+        overtime_reason: row.otReason,
+        recorded_by: currentUser?.id,
+      })
 
       const { error } = await supabase
         .from('attendance')
@@ -235,7 +263,7 @@ export default function AttendancePage() {
             shift_assignment_id: row.assignmentId,
             check_in_time: checkInTimestamp,
             check_out_time: checkOutTimestamp,
-            status: row.status || 'on_time',
+            status: dbStatus,
             remarks: row.remarks || null,
             overtime_minutes: row.otMins || 0,
             overtime_reason: row.otReason || null,
@@ -246,8 +274,13 @@ export default function AttendancePage() {
           }
         )
 
-      if (error) throw error
+      if (error) {
+        console.error('[v0] SAVE ERROR:', JSON.stringify(error))
+        alert('Save failed: ' + error.message)
+        return
+      }
 
+      console.log('[v0] SAVE SUCCESS for assignment:', row.assignmentId)
       setAttendanceData(
         attendanceData.map((r) => (r.id === id ? { ...r, saved: true } : r))
       )
@@ -278,20 +311,20 @@ export default function AttendancePage() {
     if (status === 'on_time') return 'bg-green-100 text-green-700 border-0'
     if (status === 'late') return 'bg-amber-100 text-amber-700 border-0'
     if (status === 'absent') return 'bg-red-100 text-red-700 border-0'
-    if (status === 'MC') return 'bg-blue-100 text-blue-700 border-0'
-    if (status === 'AL' || status === 'EL' || status === 'UL') return 'bg-purple-100 text-purple-700 border-0'
+    if (status === 'mc') return 'bg-blue-100 text-blue-700 border-0'
+    if (status === 'al' || status === 'el' || status === 'ul') return 'bg-purple-100 text-purple-700 border-0'
     return 'border border-slate-300 text-slate-600'
   }
 
-  const statusOptions = ['on_time', 'late', 'absent', 'MC', 'AL', 'EL', 'UL']
+  const statusOptions = ['on_time', 'late', 'absent', 'mc', 'al', 'el', 'ul']
   const statusLabels: Record<string, string> = {
     on_time: 'On time',
     late: 'Late',
     absent: 'Absent',
-    MC: 'MC',
-    AL: 'AL',
-    EL: 'EL',
-    UL: 'UL',
+    mc: 'MC',
+    al: 'AL',
+    el: 'EL',
+    ul: 'UL',
   }
 
   const filteredData = activeShift
@@ -307,7 +340,7 @@ export default function AttendancePage() {
   const lateCount = filteredData.filter((r) => r.status === 'late').length
   const absentCount = filteredData.filter((r) => r.status === 'absent').length
   const onLeaveCount = filteredData.filter((r) =>
-    ['MC', 'AL', 'EL', 'UL'].includes(r.status)
+    ['mc', 'al', 'el', 'ul'].includes(r.status)
   ).length
   const pendingStatusCount = filteredData.filter((r) => !r.status).length
   const withOTCount = filteredData.filter((r) => r.otMins > 0).length
