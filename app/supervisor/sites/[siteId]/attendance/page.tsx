@@ -63,14 +63,16 @@ export default function AttendancePage() {
         // 1. Get site UUID from site_code
         const { data: site, error: siteError } = await supabase
           .from('sites')
-          .select('id')
+          .select('id, name')
           .eq('site_code', siteId.toUpperCase())
           .single()
+
+        console.log('[v0] SITE:', site)
 
         if (siteError || !site) {
           throw new Error('Site not found')
         }
-        setSiteName(siteId.toUpperCase()) // Use site code as display name
+        setSiteName(site.name) // Use site name for display
 
         // 2. Get shift definitions for this site
         const { data: shiftDefs } = await supabase
@@ -79,6 +81,8 @@ export default function AttendancePage() {
           .eq('site_id', site.id)
           .eq('is_active', true)
           .order('start_time')
+
+        console.log('[v0] SHIFT DEFS:', shiftDefs)
 
         setShifts(shiftDefs || [])
         if (shiftDefs && shiftDefs.length > 0) {
@@ -92,6 +96,8 @@ export default function AttendancePage() {
           .select('id, shift_definition_id, start_time, end_time')
           .eq('site_id', site.id)
           .eq('shift_date', today)
+
+        console.log('[v0] SLOTS:', slots)
 
         if (!slots || slots.length === 0) {
           setAttendanceData([])
@@ -115,6 +121,8 @@ export default function AttendancePage() {
           .in('roster_slot_id', slotIds)
           .eq('is_cancelled', false)
 
+        console.log('[v0] ASSIGNMENTS:', assignments)
+
         if (!assignments) return
 
         // 5. Get existing attendance records
@@ -123,6 +131,8 @@ export default function AttendancePage() {
           .from('attendance')
           .select('*')
           .in('shift_assignment_id', assignmentIds)
+
+        console.log('[v0] EXISTING ATTENDANCE:', attendanceRecords)
 
         // 6. Build rows with attendance data
         const rows: AttendanceRow[] = assignments.map((assignment: any) => {
@@ -146,6 +156,8 @@ export default function AttendancePage() {
             shiftEndTime: shiftDef?.end_time?.slice(0, 5) || '14:00',
           }
         })
+
+        console.log('[v0] BUILT ROWS:', rows)
 
         setAttendanceData(rows)
       } catch (error) {
@@ -347,7 +359,7 @@ export default function AttendancePage() {
         {/* Title and Subtitle */}
         <div className="mb-6">
           <h1 className="text-2xl font-bold text-slate-900">
-            Attendance — {siteId} {siteName}
+            Attendance — {siteName}
           </h1>
           <p className="text-sm text-slate-600 mt-1">{dateStr}</p>
         </div>
