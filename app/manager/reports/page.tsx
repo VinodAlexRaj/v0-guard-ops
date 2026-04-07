@@ -41,6 +41,7 @@ export default function ManagerReportsPage() {
   const [unfilledSlots, setUnfilledSlots] = useState(0)
   const [supervisors, setSupervisors] = useState<SupervisorCoverage[]>([])
   const [sitesWithGaps, setSitesWithGaps] = useState<SiteGap[]>([])
+  const [supervisorOptions, setSupervisorOptions] = useState<string[]>(['All'])
 
   const handleSignOut = () => {
     router.push('/')
@@ -138,22 +139,21 @@ export default function ManagerReportsPage() {
 
         setSupervisors(supCoverage)
 
-        // Build sites with gaps
+        // Build sites with gaps — group by site_id first, then sum
         const siteMap = new Map((sites || []).map(s => [s.id, s]))
-        const siteGaps: SiteGap[] = Array.from(new Map(
-          (coverage || []).map(c => [
-            c.site_id,
-            {
-              siteId: c.site_id,
-              siteCov: (coverage || []).filter(cv => cv.site_id === c.site_id)
-            }
-          ])
-        ).entries())
-          .map(([siteId, data]) => {
+        const siteTotalsMap = new Map<string, { total: number; filled: number }>()
+        for (const c of (coverage || [])) {
+          const existing = siteTotalsMap.get(c.site_id) || { total: 0, filled: 0 }
+          siteTotalsMap.set(c.site_id, {
+            total: existing.total + c.required_headcount,
+            filled: existing.filled + c.assigned,
+          })
+        }
+
+        const siteGaps: SiteGap[] = Array.from(siteTotalsMap.entries())
+          .map(([siteId, { total, filled }]) => {
             const site = siteMap.get(siteId)
             const supervisor = (supSites || []).find(ss => ss.site_id === siteId)?.users?.full_name || 'Unknown'
-            const total = data.siteCov.reduce((sum, c) => sum + c.required_headcount, 0)
-            const filled = data.siteCov.reduce((sum, c) => sum + c.assigned, 0)
             const gap = total - filled
             const rate = total > 0 ? Math.round((filled / total) * 100) : 0
 
@@ -171,6 +171,13 @@ export default function ManagerReportsPage() {
           .slice(0, 10)
 
         setSitesWithGaps(siteGaps)
+
+        // Build supervisor filter options — only supervisors with at least 1 site assigned
+        const supSiteData = supSites || []
+        const supervisorOptions = (supervisorsData || [])
+          .filter(sup => supSiteData.some(ss => ss.supervisor_id === sup.id))
+          .map(sup => sup.full_name)
+        setSupervisorOptions(['All', ...supervisorOptions])
       } catch (error) {
         console.error('[v0] Error fetching coverage data:', error)
       } finally {
@@ -340,7 +347,7 @@ export default function ManagerReportsPage() {
                 <div className="flex items-center gap-2">
                   <span className="text-sm font-medium text-slate-700">Supervisor:</span>
                   <div className="flex gap-2">
-                    {['All', 'Azri', 'Farah', 'Rajesh', 'Tan Wei Ling'].map((supervisor) => (
+                    {supervisorOptions.map((supervisor) => (
                       <button
                         key={supervisor}
                         onClick={() => setActiveSupervisor(supervisor)}
