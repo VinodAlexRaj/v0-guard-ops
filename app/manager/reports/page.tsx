@@ -1,28 +1,185 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Card } from '@/components/ui/card'
 import { LogOut, Download } from 'lucide-react'
+import { supabase } from '@/lib/supabase/client'
+import { getLocalDateString } from '@/lib/utils'
+
+interface SupervisorCoverage {
+  name: string
+  rate: number
+  status: 'green' | 'amber' | 'red'
+}
+
+interface SiteGap {
+  code: string
+  name: string
+  supervisor: string
+  total: number
+  filled: number
+  gap: number
+  rate: number
+}
 
 export default function ManagerReportsPage() {
   const router = useRouter()
   const [activeTab, setActiveTab] = useState<'coverage' | 'attendance' | 'leave'>('coverage')
-  const [activePeriod, setActivePeriod] = useState('This week')
+  const [activePeriod, setActivePeriod] = useState('This month')
   const [activeSupervisor, setActiveSupervisor] = useState('All')
-
-  const todayDate = new Date(2026, 3, 10)
-  const dateStr = todayDate.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: '2-digit', year: 'numeric' })
+  const [loading, setLoading] = useState(false)
+  const [dateStr, setDateStr] = useState('')
+  const [managerName, setManagerName] = useState('User')
+  
+  // Coverage state
+  const [avgFillRate, setAvgFillRate] = useState(0)
+  const [totalSlots, setTotalSlots] = useState(0)
+  const [filledSlots, setFilledSlots] = useState(0)
+  const [unfilledSlots, setUnfilledSlots] = useState(0)
+  const [supervisors, setSupervisors] = useState<SupervisorCoverage[]>([])
+  const [sitesWithGaps, setSitesWithGaps] = useState<SiteGap[]>([])
 
   const handleSignOut = () => {
     router.push('/')
   }
 
-  const handleExportCSV = () => {
-    alert('Export coming soon')
-  }
+  // Set date on mount
+  useEffect(() => {
+    const todayDate = new Date()
+    const formatted = todayDate.toLocaleDateString('en-US', {
+      weekday: 'short',
+      month: 'short',
+      day: '2-digit',
+      year: 'numeric',
+    })
+    setDateStr(formatted)
+  }, [])
+
+  // Fetch coverage data when tab is active
+  useEffect(() => {
+    if (activeTab !== 'coverage' || activePeriod !== 'This month') return
+
+    const fetchCoverageData = async () => {
+      try {
+        setLoading(true)
+
+        // Get manager name
+        const { data: { user } } = await supabase.auth.getUser()
+        if (user) {
+          const { data: userData } = await supabase
+            .from('users')
+            .select('full_name')
+            .eq('id', user.id)
+            .single()
+          if (userData?.full_name) setManagerName(userData.full_name)
+        }
+
+        // Get current month range
+        const today = getLocalDateString()
+        const monthStart = today.substring(0, 7) + '-01'
+
+        // Fetch coverage data
+        const { data: coverage } = await supabase
+          .from('roster_coverage')
+          .select('site_id, shift_date, assigned, required_headcount')
+          .gte('shift_date', monthStart)
+          .lte('shift_date', today)
+
+        // Fetch sites
+        const { data: sites } = await supabase
+          .from('sites')
+          .select('id, site_code, name')
+
+        // Fetch supervisor assignments
+        const { data: supSites } = await supabase
+          .from('supervisor_sites')
+          .select('supervisor_id, site_id, users(full_name)')
+
+        // Fetch supervisors
+        const { data: supervisorsData } = await supabase
+          .from('users')
+          .select('id, full_name')
+          .eq('external_role', 'OPERATIONS EXECUTIVE')
+
+        // Calculate coverage stats
+        const totalReq = (coverage || []).reduce((sum, c) => sum + c.required_headcount, 0)
+        const totalAsgn = (coverage || []).reduce((sum, c) => sum + c.assigned, 0)
+        const fillRate = totalReq > 0 ? Math.round((totalAsgn / totalReq) * 100) : 0
+
+        setTotalSlots(totalReq)
+        setFilledSlots(totalAsgn)
+        setUnfilledSlots(totalReq - totalAsgn)
+        setAvgFillRate(fillRate)
+
+        // Build supervisor coverage stats
+        const supMap = new Map((supervisorsData || []).map(s => [s.id, s.full_name]))
+        const supSiteMap = new Map<string, number[]>()
+        ;(supSites || []).forEach(ss => {
+          const siteIds = supSiteMap.get(ss.supervisor_id) || []
+          siteIds.push(ss.site_id)
+          supSiteMap.set(ss.supervisor_id, siteIds)
+        })
+
+        const supCoverage: SupervisorCoverage[] = Array.from(supSiteMap.entries()).map(([supId, siteIds]) => {
+          const supCov = (coverage || []).filter(c => siteIds.includes(c.site_id))
+          const supReq = supCov.reduce((sum, c) => sum + c.required_headcount, 0)
+          const supAsgn = supCov.reduce((sum, c) => sum + c.assigned, 0)
+          const rate = supReq > 0 ? Math.round((supAsgn / supReq) * 100) : 100
+          
+          return {
+            name: supMap.get(supId) || 'Unknown',
+            rate,
+            status: rate >= 90 ? 'green' : rate >= 70 ? 'amber' : 'red',
+          }
+        })
+
+        setSupervisors(supCoverage)
+
+        // Build sites with gaps
+        const siteMap = new Map((sites || []).map(s => [s.id, s]))
+        const siteGaps: SiteGap[] = Array.from(new Map(
+          (coverage || []).map(c => [
+            c.site_id,
+            {
+              siteId: c.site_id,
+              siteCov: (coverage || []).filter(cv => cv.site_id === c.site_id)
+            }
+          ])
+        ).entries())
+          .map(([siteId, data]) => {
+            const site = siteMap.get(siteId)
+            const supervisor = (supSites || []).find(ss => ss.site_id === siteId)?.users?.full_name || 'Unknown'
+            const total = data.siteCov.reduce((sum, c) => sum + c.required_headcount, 0)
+            const filled = data.siteCov.reduce((sum, c) => sum + c.assigned, 0)
+            const gap = total - filled
+            const rate = total > 0 ? Math.round((filled / total) * 100) : 0
+
+            return {
+              code: site?.site_code || 'N/A',
+              name: site?.name || 'Unknown',
+              supervisor,
+              total,
+              filled,
+              gap,
+              rate,
+            }
+          })
+          .sort((a, b) => a.rate - b.rate)
+          .slice(0, 10)
+
+        setSitesWithGaps(siteGaps)
+      } catch (error) {
+        console.error('[v0] Error fetching coverage data:', error)
+      } finally {
+        setLoading(false)
+      }
+    }
+
+    fetchCoverageData()
+  }, [activeTab, activePeriod])
 
   const getColorClass = (color: string) => {
     switch (color) {
@@ -45,14 +202,9 @@ export default function ManagerReportsPage() {
     return 'bg-red-100 text-red-700'
   }
 
-  const supervisors = [
-    { name: 'Azri Hamdan', rate: 83, status: 'amber' },
-    { name: 'Farah Izzati', rate: 90, status: 'green' },
-    { name: 'Rajesh Kumar', rate: 76, status: 'red' },
-    { name: 'Tan Wei Ling', rate: 97, status: 'green' },
-  ]
-
-  const attendanceStats = [
+  const handleExportCSV = () => {
+    alert('Export coming soon')
+  }
     { label: 'On time', percentage: 78, color: 'green' },
     { label: 'Late', percentage: 12, color: 'amber' },
     { label: 'Absent', percentage: 7, color: 'red' },
@@ -104,7 +256,7 @@ export default function ManagerReportsPage() {
           <div className="text-sm text-slate-600">{dateStr}</div>
           <div className="flex items-center gap-4">
             <div className="text-right">
-              <p className="text-sm font-medium text-slate-900">Vinod Alex Raj</p>
+              <p className="text-sm font-medium text-slate-900">{managerName}</p>
               <Badge variant="secondary" className="mt-1">
                 Manager
               </Badge>
@@ -224,19 +376,19 @@ export default function ManagerReportsPage() {
               <div className="grid grid-cols-4 gap-4">
                 <Card className="border-slate-200 p-4">
                   <p className="text-xs text-slate-600 mb-2">Avg fill rate</p>
-                  <p className="text-3xl font-bold text-green-600">87%</p>
+                  <p className="text-3xl font-bold text-green-600">{avgFillRate}%</p>
                 </Card>
                 <Card className="border-slate-200 p-4">
                   <p className="text-xs text-slate-600 mb-2">Total slots</p>
-                  <p className="text-3xl font-bold text-blue-600">1,680</p>
+                  <p className="text-3xl font-bold text-blue-600">{totalSlots.toLocaleString()}</p>
                 </Card>
                 <Card className="border-slate-200 p-4">
                   <p className="text-xs text-slate-600 mb-2">Filled slots</p>
-                  <p className="text-3xl font-bold text-green-600">1,462</p>
+                  <p className="text-3xl font-bold text-green-600">{filledSlots.toLocaleString()}</p>
                 </Card>
                 <Card className="border-slate-200 p-4">
                   <p className="text-xs text-slate-600 mb-2">Unfilled slots</p>
-                  <p className="text-3xl font-bold text-red-600">218</p>
+                  <p className="text-3xl font-bold text-red-600">{unfilledSlots.toLocaleString()}</p>
                 </Card>
               </div>
 
