@@ -15,6 +15,8 @@ export default function SchedulePage() {
   const siteId = params.siteId as string
 
   // State for transformed data
+  const [viewMode, setViewMode] = useState<'week' | 'day'>('week')
+  const [dayViewDate, setDayViewDate] = useState<Date>(new Date(2026, 3, 10)) // default to today
   const [selectedCell, setSelectedCell] = useState({ shiftIndex: 1, dayIndex: 2 }) // Wed Afternoon pre-selected
   const [selectedSlot, setSelectedSlot] = useState<any | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
@@ -545,142 +547,248 @@ export default function SchedulePage() {
                 </Badge>
               </div>
 
-            {/* Week Navigation */}
+            {/* Week / Day Navigation */}
             <div className="flex items-center justify-between mb-6">
               <div className="flex items-center gap-3">
-                <Button variant="ghost" size="sm" className="text-slate-600">
-                  <ChevronLeft className="w-5 h-5" />
-                </Button>
-                <span className="text-sm font-medium text-slate-900">
-                  {weekStart.getDate()} – {weekEnd.getDate()} Apr 2026
-                </span>
-                <Button variant="ghost" size="sm" className="text-slate-600">
-                  <ChevronRight className="w-5 h-5" />
-                </Button>
+                {viewMode === 'week' ? (
+                  <>
+                    <Button variant="ghost" size="sm" className="text-slate-600">
+                      <ChevronLeft className="w-5 h-5" />
+                    </Button>
+                    <span className="text-sm font-medium text-slate-900">
+                      {weekStart.getDate()} – {weekEnd.getDate()} Apr 2026
+                    </span>
+                    <Button variant="ghost" size="sm" className="text-slate-600">
+                      <ChevronRight className="w-5 h-5" />
+                    </Button>
+                  </>
+                ) : (
+                  <>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="text-slate-600"
+                      onClick={() => {
+                        const prev = new Date(dayViewDate)
+                        prev.setDate(prev.getDate() - 1)
+                        if (prev >= weekStart) setDayViewDate(prev)
+                      }}
+                    >
+                      <ChevronLeft className="w-5 h-5" />
+                    </Button>
+                    <span className="text-sm font-medium text-slate-900">
+                      {dayViewDate.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' })}
+                    </span>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="text-slate-600"
+                      onClick={() => {
+                        const next = new Date(dayViewDate)
+                        next.setDate(next.getDate() + 1)
+                        if (next <= weekEnd) setDayViewDate(next)
+                      }}
+                    >
+                      <ChevronRight className="w-5 h-5" />
+                    </Button>
+                  </>
+                )}
               </div>
               <div className="flex gap-2">
-                <Button variant="outline" size="sm" className="text-teal-600 border-teal-200">
+                <Button
+                  variant={viewMode === 'week' ? 'outline' : 'ghost'}
+                  size="sm"
+                  className={viewMode === 'week' ? 'text-teal-600 border-teal-200' : 'text-slate-600'}
+                  onClick={() => setViewMode('week')}
+                >
                   Week
                 </Button>
-                <Button variant="ghost" size="sm" className="text-slate-600">
+                <Button
+                  variant={viewMode === 'day' ? 'outline' : 'ghost'}
+                  size="sm"
+                  className={viewMode === 'day' ? 'text-teal-600 border-teal-200' : 'text-slate-600'}
+                  onClick={() => setViewMode('day')}
+                >
                   Day
                 </Button>
               </div>
             </div>
 
-            {/* Coverage Strip */}
-            <div className="flex gap-2 mb-6">
-              {/* Spacer to align with Shift column */}
-              <div className="w-32 flex-shrink-0"></div>
-              
-              {/* Days columns */}
-              <div className="grid grid-cols-7 gap-2 flex-1">
-                {days.map((day, idx) => {
-                  const isToday = day.getTime() === today.getTime()
-                  const coverage = realCoverageData[idx]
+            {viewMode === 'week' ? (
+              <>
+                {/* Coverage Strip */}
+                <div className="flex gap-2 mb-6">
+                  <div className="w-32 flex-shrink-0"></div>
+                  <div className="grid grid-cols-7 gap-2 flex-1">
+                    {days.map((day, idx) => {
+                      const isToday = day.getTime() === today.getTime()
+                      const coverage = realCoverageData[idx]
+                      return (
+                        <div
+                          key={idx}
+                          className={`p-3 rounded-lg border ${isToday ? 'bg-blue-50 border-blue-200' : 'bg-white border-slate-200'}`}
+                        >
+                          <div className="text-xs font-semibold text-slate-700 mb-2">
+                            {dayNames[idx]} {day.getDate()}
+                          </div>
+                          <div className={`text-lg font-bold ${getCoverageColor(coverage)}`}>{coverage}%</div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
+
+                {/* Roster Grid */}
+                <Card className="border-slate-200 overflow-hidden">
+                  <div className="overflow-x-auto">
+                    <table className="w-full">
+                      <thead>
+                        <tr className="bg-slate-50 border-b border-slate-200">
+                          <th className="px-4 py-3 text-left text-xs font-semibold text-slate-700 w-32">Shift</th>
+                          {days.map((day, idx) => {
+                            const isToday = day.getTime() === today.getTime()
+                            return (
+                              <th
+                                key={idx}
+                                className={`px-4 py-3 text-center text-xs font-semibold ${isToday ? 'bg-blue-50' : ''} text-slate-700`}
+                              >
+                                {dayNames[idx]} {day.getDate()}
+                              </th>
+                            )
+                          })}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {shifts.map((shift, shiftIdx) => (
+                          <tr key={shiftIdx} className="border-b border-slate-200">
+                            <td className="px-4 py-3 text-sm font-semibold text-slate-900">
+                              <div>{shift.name}</div>
+                              <div className="text-xs text-slate-600">{shift.time}</div>
+                            </td>
+                            {days.map((day, dayIdx) => {
+                              const isToday = day.getTime() === today.getTime()
+                              const isSelected = selectedCell.shiftIndex === shiftIdx && selectedCell.dayIndex === dayIdx
+                              const targetShiftCode = shifts[shiftIdx]?.code
+                              const dayStr = day.toISOString().split('T')[0]
+                              const slot = slotsRef.current.find(s => {
+                                const slotDate = new Date(s.shift_date).toISOString().split('T')[0]
+                                const shiftDef = shiftDefs.find(sd => sd.id === s.shift_definition_id)
+                                return slotDate === dayStr && shiftDef?.shift_code?.startsWith(targetShiftCode)
+                              })
+                              const cells = getRosterCell(shiftIdx, dayIdx)
+                              const required = slot ? getRequiredHeadcountForSlot(slot.id) : getRequiredHeadcount(shiftIdx)
+                              const filled = cells.length
+                              const unfilled = Math.max(0, required - filled)
+                              return (
+                                <td
+                                  key={dayIdx}
+                                  onClick={() => {
+                                    setSelectedCell({ shiftIndex: shiftIdx, dayIndex: dayIdx })
+                                    setSelectedSlot(slot)
+                                  }}
+                                  className={`px-4 py-3 text-center cursor-pointer transition ${
+                                    isSelected ? 'bg-teal-50 border-2 border-teal-300' : isToday ? 'bg-blue-50' : ''
+                                  }`}
+                                >
+                                  <div className="space-y-1">
+                                    {cells.map((cell, cellIdx) => {
+                                      const dateStr = day.toISOString().split('T')[0]
+                                      const guardMap = guardShiftCounts.get(dateStr) || new Map()
+                                      const guardId = cell[2] ? assignments.find(a => a.id === cell[2])?.guard_id : null
+                                      const shiftCount = guardId ? (guardMap.get(guardId) || 1) : 1
+                                      return (
+                                        <div key={cellIdx} className={`px-2 py-1 rounded text-xs font-medium ${getChipColor(cell[1], shiftCount)}`}>
+                                          {cell[0]}
+                                        </div>
+                                      )
+                                    })}
+                                    {Array.from({ length: unfilled }).map((_, idx) => (
+                                      <div key={`empty-${idx}`} className={`px-2 py-1 rounded text-xs font-medium ${getChipColor(null)}`}>
+                                        + assign
+                                      </div>
+                                    ))}
+                                  </div>
+                                </td>
+                              )
+                            })}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </Card>
+              </>
+            ) : (
+              /* Day View */
+              <div className="space-y-3">
+                {shifts.map((shift, shiftIdx) => {
+                  const dayStr = dayViewDate.toISOString().split('T')[0]
+                  const dayIdx = days.findIndex(d => d.toISOString().split('T')[0] === dayStr)
+                  const targetShiftCode = shift.code
+                  const slot = slotsRef.current.find(s => {
+                    const slotDate = new Date(s.shift_date).toISOString().split('T')[0]
+                    const shiftDef = shiftDefs.find(sd => sd.id === s.shift_definition_id)
+                    return slotDate === dayStr && shiftDef?.shift_code?.startsWith(targetShiftCode)
+                  })
+                  const cells = dayIdx >= 0 ? getRosterCell(shiftIdx, dayIdx) : []
+                  const required = slot ? getRequiredHeadcountForSlot(slot.id) : shift.required
+                  const filled = cells.length
+                  const unfilled = Math.max(0, required - filled)
+                  const isSelected = selectedCell.shiftIndex === shiftIdx && selectedCell.dayIndex === dayIdx
+
                   return (
-                    <div
-                      key={idx}
-                      className={`p-3 rounded-lg border ${isToday ? 'bg-blue-50 border-blue-200' : 'bg-white border-slate-200'}`}
+                    <Card
+                      key={shiftIdx}
+                      onClick={() => {
+                        if (dayIdx >= 0) {
+                          setSelectedCell({ shiftIndex: shiftIdx, dayIndex: dayIdx })
+                          setSelectedSlot(slot)
+                        }
+                      }}
+                      className={`border-slate-200 p-4 cursor-pointer transition ${isSelected ? 'border-teal-300 bg-teal-50' : ''}`}
                     >
-                      <div className="text-xs font-semibold text-slate-700 mb-2">
-                        {dayNames[idx]} {day.getDate()}
+                      <div className="flex items-start gap-6">
+                        {/* Shift label */}
+                        <div className="w-36 flex-shrink-0">
+                          <div className="text-sm font-semibold text-slate-900">{shift.name}</div>
+                          <div className="text-xs text-slate-500">{shift.time}</div>
+                        </div>
+
+                        {/* Chips */}
+                        <div className="flex flex-wrap gap-2 flex-1">
+                          {cells.map((cell, cellIdx) => {
+                            const guardMap = guardShiftCounts.get(dayStr) || new Map()
+                            const guardId = cell[2] ? assignments.find(a => a.id === cell[2])?.guard_id : null
+                            const shiftCount = guardId ? (guardMap.get(guardId) || 1) : 1
+                            return (
+                              <div key={cellIdx} className={`px-2 py-1 rounded text-xs font-medium ${getChipColor(cell[1], shiftCount)}`}>
+                                {cell[0]}
+                              </div>
+                            )
+                          })}
+                          {Array.from({ length: unfilled }).map((_, idx) => (
+                            <div key={`empty-${idx}`} className={`px-2 py-1 rounded text-xs font-medium ${getChipColor(null)}`}>
+                              + assign
+                            </div>
+                          ))}
+                        </div>
+
+                        {/* Headcount bar */}
+                        <div className="w-28 flex-shrink-0">
+                          <div className="text-xs text-slate-600 mb-1 text-right">{filled} of {required}</div>
+                          <div className="h-2 bg-slate-200 rounded-full overflow-hidden">
+                            <div
+                              className={`h-full rounded-full transition-all ${filled >= required ? 'bg-green-500' : filled > 0 ? 'bg-amber-400' : 'bg-slate-300'}`}
+                              style={{ width: `${required > 0 ? Math.min(100, (filled / required) * 100) : 0}%` }}
+                            />
+                          </div>
+                        </div>
                       </div>
-                      <div className={`text-lg font-bold ${getCoverageColor(coverage)}`}>{coverage}%</div>
-                    </div>
+                    </Card>
                   )
                 })}
               </div>
-            </div>
-
-            {/* Roster Grid */}
-            <Card className="border-slate-200 overflow-hidden">
-              <div className="overflow-x-auto">
-                <table className="w-full">
-                  <thead>
-                    <tr className="bg-slate-50 border-b border-slate-200">
-                      <th className="px-4 py-3 text-left text-xs font-semibold text-slate-700 w-32">Shift</th>
-                      {days.map((day, idx) => {
-                        const isToday = day.getTime() === today.getTime()
-                        return (
-                          <th
-                            key={idx}
-                            className={`px-4 py-3 text-center text-xs font-semibold ${isToday ? 'bg-blue-50' : ''} text-slate-700`}
-                          >
-                            {dayNames[idx]} {day.getDate()}
-                          </th>
-                        )
-                      })}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {shifts.map((shift, shiftIdx) => (
-                      <tr key={shiftIdx} className="border-b border-slate-200">
-                        <td className="px-4 py-3 text-sm font-semibold text-slate-900">
-                          <div>{shift.name}</div>
-                          <div className="text-xs text-slate-600">{shift.time}</div>
-                        </td>
-                        {days.map((day, dayIdx) => {
-                          const isToday = day.getTime() === today.getTime()
-                          const isSelected = selectedCell.shiftIndex === shiftIdx && selectedCell.dayIndex === dayIdx
-                          
-                          // Find the slot for this shift/day
-                          const targetShiftCode = shifts[shiftIdx]?.code
-                          const dayStr = day.toISOString().split('T')[0]
-                          const slot = slotsRef.current.find(s => {
-                            const slotDate = new Date(s.shift_date).toISOString().split('T')[0]
-                            const shiftDef = shiftDefs.find(sd => sd.id === s.shift_definition_id)
-                            return slotDate === dayStr && shiftDef?.shift_code?.startsWith(targetShiftCode)
-                          })
-                          
-                          const cells = getRosterCell(shiftIdx, dayIdx)
-                          const required = slot ? getRequiredHeadcountForSlot(slot.id) : getRequiredHeadcount(shiftIdx)
-                          const filled = cells.length
-                          const unfilled = Math.max(0, required - filled)
-                          
-                          return (
-                            <td
-                              key={dayIdx}
-                              onClick={() => {
-                                setSelectedCell({ shiftIndex: shiftIdx, dayIndex: dayIdx })
-                                setSelectedSlot(slot)
-                              }}
-                              className={`px-4 py-3 text-center cursor-pointer transition ${
-                                isSelected ? 'bg-teal-50 border-2 border-teal-300' : isToday ? 'bg-blue-50' : ''
-                              }`}
-                            >
-                              <div className="space-y-1">
-                                {/* Show assigned guard chips */}
-                                {cells.map((cell, cellIdx) => {
-                                  // Get shift count for this guard on this date
-                                  const dateObj = days[dayIdx]
-                                  const dateStr = dateObj.toISOString().split('T')[0]
-                                  const guardMap = guardShiftCounts.get(dateStr) || new Map()
-                                  const guardId = cell[2] ? assignments.find(a => a.id === cell[2])?.guard_id : null
-                                  const shiftCount = guardId ? (guardMap.get(guardId) || 1) : 1
-                                  
-                                  return (
-                                    <div key={cellIdx} className={`px-2 py-1 rounded text-xs font-medium ${getChipColor(cell[1], shiftCount)}`}>
-                                      {cell[0]}
-                                    </div>
-                                  )
-                                })}
-                                {/* Show "+ assign" chips for unfilled slots */}
-                                {Array.from({ length: unfilled }).map((_, idx) => (
-                                  <div key={`empty-${idx}`} className={`px-2 py-1 rounded text-xs font-medium ${getChipColor(null)}`}>
-                                    + assign
-                                  </div>
-                                ))}
-                              </div>
-                            </td>
-                          )
-                        })}
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </Card>
+            )}
 
             {/* Legend & Warning */}
             <div>
