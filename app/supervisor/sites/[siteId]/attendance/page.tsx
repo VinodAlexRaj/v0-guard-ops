@@ -151,10 +151,18 @@ export default function AttendancePage() {
             name: guard?.full_name || 'Unknown',
             code: guard?.external_employee_code || 'N/A',
             checkIn: existing?.check_in_time
-              ? new Date(existing.check_in_time).toTimeString().slice(0, 5)
+              ? new Date(existing.check_in_time).toLocaleTimeString('en-MY', {
+                  hour: '2-digit',
+                  minute: '2-digit',
+                  hour12: false
+                })
               : '',
             checkOut: existing?.check_out_time
-              ? new Date(existing.check_out_time).toTimeString().slice(0, 5)
+              ? new Date(existing.check_out_time).toLocaleTimeString('en-MY', {
+                  hour: '2-digit',
+                  minute: '2-digit',
+                  hour12: false
+                })
               : '',
             status: existing?.status || null,
             remarks: existing?.remarks || '',
@@ -237,24 +245,10 @@ export default function AttendancePage() {
         'UL': 'ul',
       }
 
-      // Build full ISO timestamps with Malaysia timezone (+08:00)
       const today = getLocalDateString()
       const checkInTimestamp = row.checkIn ? `${today}T${row.checkIn}:00+08:00` : null
       const checkOutTimestamp = row.checkOut ? `${today}T${row.checkOut}:00+08:00` : null
-      
-      // Get the database status value, default to 'on_time'
       const dbStatus = row.status ? (statusMap[row.status] || 'on_time') : 'on_time'
-
-      console.log('[v0] SAVE PAYLOAD:', {
-        shift_assignment_id: row.assignmentId,
-        check_in_time: checkInTimestamp,
-        check_out_time: checkOutTimestamp,
-        status: dbStatus,
-        remarks: row.remarks,
-        overtime_minutes: row.otMins,
-        overtime_reason: row.otReason,
-        recorded_by: currentUser?.id,
-      })
 
       const { error } = await supabase
         .from('attendance')
@@ -280,7 +274,6 @@ export default function AttendancePage() {
         return
       }
 
-      console.log('[v0] SAVE SUCCESS for assignment:', row.assignmentId)
       setAttendanceData(
         attendanceData.map((r) => (r.id === id ? { ...r, saved: true } : r))
       )
