@@ -223,13 +223,18 @@ export default function AttendancePage() {
     if (!row) return
 
     try {
+      // Build full ISO timestamps by combining today's date with the time
+      const today = getLocalDateString()
+      const checkInTimestamp = row.checkIn ? `${today}T${row.checkIn}:00` : null
+      const checkOutTimestamp = row.checkOut ? `${today}T${row.checkOut}:00` : null
+
       const { error } = await supabase
         .from('attendance')
         .upsert(
           {
             shift_assignment_id: row.assignmentId,
-            check_in_time: row.checkIn ? `${row.checkIn}:00` : null,
-            check_out_time: row.checkOut ? `${row.checkOut}:00` : null,
+            check_in_time: checkInTimestamp,
+            check_out_time: checkOutTimestamp,
             status: row.status || 'on_time',
             remarks: row.remarks || null,
             overtime_minutes: row.otMins || 0,
