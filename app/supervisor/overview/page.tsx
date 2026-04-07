@@ -78,10 +78,10 @@ export default function SupervisorOverviewPage() {
         const siteIds = supervisorSites.map(ss => ss.site_id)
         const today = new Date().toISOString().split('T')[0]
 
-        // FETCH 2 — Get today's roster coverage with shift details
+        // FETCH 2 — Get today's roster coverage with site details
         const { data: coverage } = await supabase
           .from('roster_coverage')
-          .select('site_id, shift_definition_id, assigned, required_headcount, is_fulfilled, shift_date')
+          .select('site_id, shift_definition_id, assigned, required_headcount, is_fulfilled, shift_date, sites(site_code, name)')
           .in('site_id', siteIds)
           .eq('shift_date', today)
 
@@ -111,16 +111,26 @@ export default function SupervisorOverviewPage() {
 
         // BUILD SITES TABLE
         const sitesMap = new Map<string, SiteData>()
+        
+        // Initialize sites from supervisor_sites
         supervisorSites.forEach(ss => {
           const siteCode = ss.sites?.site_code || 'Unknown'
           sitesMap.set(siteCode, {
             code: siteCode,
-            name: siteCode, // Use site code as name since we don't have a dedicated name field
+            name: siteCode, // Will be updated from coverage data if available
             id: ss.site_id,
             shifts: [],
             fillRate: 0,
             openSlots: 0,
           })
+        })
+
+        // Update site names and build shifts from coverage data
+        coverage?.forEach(cov => {
+          const site = Array.from(sitesMap.values()).find(s => s.id === cov.site_id)
+          if (site && cov.sites?.name) {
+            site.name = cov.sites.name // Use actual site name from join
+          }
         })
 
         // Build shifts array for each site with today's coverage status
@@ -136,10 +146,10 @@ export default function SupervisorOverviewPage() {
                 status,
               })
             } else {
-              // No coverage row - show as partial (no slots assigned)
+              // No coverage row - show as gap
               site.shifts.push({
                 name: shiftDef.shift_name,
-                status: 'partial',
+                status: 'gap',
               })
             }
           })
@@ -151,7 +161,7 @@ export default function SupervisorOverviewPage() {
           const totalRequired = siteCoverage.reduce((sum, c) => sum + (c.required_headcount || 0), 0)
           const totalAssigned = siteCoverage.reduce((sum, c) => sum + (c.assigned || 0), 0)
           
-          site.openSlots = Math.max(0, totalRequired - totalAssigned)
+          site.openSlots = totalRequired - totalAssigned
           if (totalRequired > 0) {
             site.fillRate = Math.round((totalAssigned / totalRequired) * 100)
           }
@@ -160,13 +170,11 @@ export default function SupervisorOverviewPage() {
         setSitesData(Array.from(sitesMap.values()))
 
         // BUILD STATS
-        const sitesWithGaps = Array.from(sitesMap.values()).filter(s =>
-          s.shifts.some(sh => sh.status === 'gap')
-        ).length
+        const sitesWithGaps = Array.from(sitesMap.values()).filter(s => s.openSlots > 0).length
         const totalUnfilled = Array.from(sitesMap.values()).reduce((sum, s) => sum + s.openSlots, 0)
         const totalRequired = coverage?.reduce((sum, c) => sum + (c.required_headcount || 0), 0) || 1
         const totalAssigned = coverage?.reduce((sum, c) => sum + (c.assigned || 0), 0) || 0
-        const overallFillRate = Math.round((totalAssigned / totalRequired) * 100)
+        const overallFillRate = totalRequired > 0 ? Math.round((totalAssigned / totalRequired) * 100) : 0
 
         setStats([
           { ...stats[0], value: sitesWithGaps },
