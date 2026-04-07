@@ -205,6 +205,9 @@ export default function ManagerReportsPage() {
   const handleExportCSV = () => {
     alert('Export coming soon')
   }
+
+  // Mock data for Attendance tab (keeping for now)
+  const attendanceStats = [
     { label: 'On time', percentage: 78, color: 'green' },
     { label: 'Late', percentage: 12, color: 'amber' },
     { label: 'Absent', percentage: 7, color: 'red' },
@@ -217,13 +220,6 @@ export default function ManagerReportsPage() {
     { name: 'Rajan Muthu', onTime: 19, late: 0, absent: 2, otHours: '1.5 hrs', rate: 90 },
     { name: 'Kamal Aizuddin', onTime: 15, late: 3, absent: 3, otHours: '0 hrs', rate: 71 },
     { name: 'Nora Baharom', onTime: 12, late: 1, absent: 0, otHours: '0 hrs', rate: 92 },
-  ]
-
-  // Sites with coverage gaps data
-  const sitesWithGaps = [
-    { code: 'KLBNG07', supervisor: 'Rajesh Kumar', total: 84, filled: 35, gap: 49, rate: '41%' },
-    { code: 'KLSNT01', supervisor: 'Azri Hamdan', total: 84, filled: 28, gap: 56, rate: '33%' },
-    { code: 'CYBJ03', supervisor: 'Rajesh Kumar', total: 56, filled: 34, gap: 22, rate: '60%' },
   ]
 
   const leaveStats = [
