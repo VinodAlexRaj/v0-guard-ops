@@ -16,9 +16,16 @@ import {
 } from '@/components/ui/table'
 import { LogOut, AlertCircle, PieChart } from 'lucide-react'
 
+interface ShiftStatus {
+  name: string
+  status: 'filled' | 'partial' | 'gap'
+}
+
 interface SiteData {
   code: string
   name: string
+  id: string
+  shifts: ShiftStatus[]
   fillRate: number
   openSlots: number
 }
@@ -83,15 +90,21 @@ export default function SupervisorOverviewPage() {
           }
         })
 
-        // STEP 2 — Fetch today's coverage
+        // STEP 2 — Fetch today's coverage and shift definitions
         const siteIds = supervisorSites.map(ss => ss.site_id)
         const today = new Date().toISOString().split('T')[0]
 
         const { data: coverage } = await supabase
           .from('roster_coverage')
-          .select('site_id, assigned, required_headcount, is_fulfilled')
+          .select('site_id, shift_definition_id, assigned, required_headcount, is_fulfilled')
           .in('site_id', siteIds)
           .eq('shift_date', today)
+
+        const { data: shiftDefs } = await supabase
+          .from('shift_definitions')
+          .select('id, site_id, shift_name')
+          .in('site_id', siteIds)
+          .eq('is_active', true)
 
         // FETCH 3 — Get absent guards today
         const { data: absents } = await supabase
@@ -117,9 +130,29 @@ export default function SupervisorOverviewPage() {
           const openSlots = totalRequired - totalAssigned
           const fillRate = totalRequired > 0 ? Math.round((totalAssigned / totalRequired) * 100) : 0
 
+          // Build shifts array for this site
+          const siteShiftDefs = shiftDefs?.filter(sd => sd.site_id === site.id) || []
+          const shifts: ShiftStatus[] = siteShiftDefs.map(shiftDef => {
+            const covRow = siteCoverage.find(c => c.shift_definition_id === shiftDef.id)
+            let status: 'filled' | 'partial' | 'gap' = 'gap'
+            if (covRow) {
+              if (covRow.assigned > 0 && covRow.is_fulfilled) {
+                status = 'filled'
+              } else if (covRow.assigned > 0) {
+                status = 'partial'
+              }
+            }
+            return {
+              name: shiftDef.shift_name,
+              status,
+            }
+          })
+
           return {
             code: site.code,
             name: site.name,
+            id: site.id,
+            shifts,
             fillRate,
             openSlots,
           }
@@ -190,6 +223,18 @@ export default function SupervisorOverviewPage() {
     if (rate >= 80) return 'bg-green-100 text-green-800'
     if (rate >= 50) return 'bg-amber-100 text-amber-800'
     return 'bg-red-100 text-red-800'
+  }
+
+  const getShiftStatusColor = (status: ShiftStatus['status']) => {
+    if (status === 'filled') return 'bg-green-100 text-green-700'
+    if (status === 'partial') return 'bg-amber-100 text-amber-700'
+    return 'bg-red-100 text-red-700'
+  }
+
+  const getShiftStatusSymbol = (status: ShiftStatus['status']) => {
+    if (status === 'filled') return '✓'
+    if (status === 'partial') return '~'
+    return '✗'
   }
 
   const todayDate = new Date()
@@ -289,6 +334,7 @@ export default function SupervisorOverviewPage() {
                     <TableRow className="border-slate-200">
                       <TableHead className="text-slate-700 font-semibold">Site Code</TableHead>
                       <TableHead className="text-slate-700 font-semibold">Site Name</TableHead>
+                      <TableHead className="text-slate-700 font-semibold">Shifts today</TableHead>
                       <TableHead className="text-slate-700 font-semibold">Fill rate</TableHead>
                       <TableHead className="text-slate-700 font-semibold">Open slots</TableHead>
                       <TableHead className="text-slate-700 font-semibold">Action</TableHead>
@@ -299,6 +345,18 @@ export default function SupervisorOverviewPage() {
                       <TableRow key={idx} className="border-slate-200 hover:bg-slate-50">
                         <TableCell className="font-medium text-slate-900">{site.code}</TableCell>
                         <TableCell className="text-slate-900">{site.name}</TableCell>
+                        <TableCell>
+                          <div className="flex gap-2">
+                            {site.shifts.map((shift, sidx) => (
+                              <span
+                                key={sidx}
+                                className={`px-2 py-1 rounded text-xs font-medium ${getShiftStatusColor(shift.status)}`}
+                              >
+                                {shift.name} {getShiftStatusSymbol(shift.status)}
+                              </span>
+                            ))}
+                          </div>
+                        </TableCell>
                         <TableCell>
                           <Badge className={getFillRateBadgeColor(site.fillRate)}>
                             {site.fillRate}%
