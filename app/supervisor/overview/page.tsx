@@ -109,17 +109,11 @@ export default function SupervisorOverviewPage() {
         const siteIds = supervisorSites.map(ss => ss.site_id)
         const today = getLocalDateString()
 
-        console.log('[v0] TODAY DATE:', today)
-        console.log('[v0] SITE IDS:', siteIds)
-
         const { data: coverage, error: coverageError } = await supabase
           .from('roster_coverage')
-          .select('site_id, assigned, required_headcount, is_fulfilled')
+          .select('site_id, shift_definition_id, assigned, required_headcount, is_fulfilled')
           .in('site_id', siteIds)
           .eq('shift_date', today)
-
-        console.log('[v0] COVERAGE RESULT:', JSON.stringify(coverage))
-        console.log('[v0] COVERAGE ERROR:', coverageError)
 
         const { data: shiftDefs } = await supabase
           .from('shift_definitions')
@@ -163,25 +157,30 @@ export default function SupervisorOverviewPage() {
           }
         })
 
-        // STEP 4 — ADD SHIFT CHIPS (visual only - show all shifts as amber since roster_coverage doesn't have shift_definition_id)
+        // STEP 4 — ADD SHIFT CHIPS (visual only - shows accurate shift status based on coverage)
         siteRows.forEach(siteRow => {
+          const siteCoverage = coverage?.filter(c => c.site_id === siteRow.id) || []
           const siteShiftDefs = shiftDefs?.filter(sd => sd.site_id === siteRow.id) || []
           
-          siteRow.shifts = siteShiftDefs.map(shiftDef => ({
-            name: shiftDef.shift_name,
-            status: 'partial' as const, // All shifts shown as amber until we can match coverage to shifts
-          }))
+          siteRow.shifts = siteShiftDefs.map(shiftDef => {
+            const covRow = siteCoverage.find(c => c.shift_definition_id === shiftDef.id)
+            let status: 'filled' | 'partial' | 'gap' = 'gap'
+            
+            if (covRow) {
+              if (covRow.is_fulfilled) {
+                status = 'filled' // green ✓
+              } else if (covRow.assigned > 0) {
+                status = 'partial' // amber ~
+              } else {
+                status = 'gap' // red ✗
+              }
+            }
+            
+            return { name: shiftDef.shift_name, status }
+          })
         })
 
         setSitesData(siteRows)
-
-        console.log('[v0] SITE ROWS:', JSON.stringify(siteRows.map(s => ({
-          code: s.code,
-          totalRequired: s.totalRequired,
-          totalAssigned: s.totalAssigned,
-          openSlots: s.openSlots,
-          fillRate: s.fillRate
-        }))))
 
         // STEP 5 — Calculate stat cards from siteRows (after all numeric calculations are done)
         const calcSitesWithGaps = siteRows.filter(s => s.openSlots > 0).length
