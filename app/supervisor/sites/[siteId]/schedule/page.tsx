@@ -16,6 +16,14 @@ export default function SchedulePage() {
 
   // State for transformed data
   const [viewMode, setViewMode] = useState<'week' | 'day'>('week')
+  const [weekStartDate, setWeekStartDate] = useState<Date>(() => {
+    const d = new Date(2026, 3, 10) // April 10, 2026 (Thursday)
+    const day = d.getDay() // 0=Sun, 1=Mon, 2=Tue...
+    const diff = d.getDate() - day + (day === 0 ? -6 : 1)
+    d.setDate(diff)
+    d.setHours(0, 0, 0, 0)
+    return d
+  })
   const [dayViewDate, setDayViewDate] = useState<Date>(new Date(2026, 3, 10)) // default to today
   const [selectedCell, setSelectedCell] = useState({ shiftIndex: 1, dayIndex: 2 }) // Wed Afternoon pre-selected
   const [selectedSlot, setSelectedSlot] = useState<any | null>(null)
@@ -44,8 +52,9 @@ export default function SchedulePage() {
     router.push('/supervisor/overview')
   }
 
-  const weekStart = new Date(2026, 3, 7) // April 7, 2026
-  const weekEnd = new Date(2026, 3, 13) // April 13, 2026
+  const weekStart = weekStartDate
+  const weekEnd = new Date(weekStart)
+  weekEnd.setDate(weekEnd.getDate() + 6) // 6 days after Monday = Sunday
   const today = new Date(2026, 3, 10) // April 10, 2026 (Thursday)
 
   const shifts = [
@@ -56,12 +65,12 @@ export default function SchedulePage() {
 
   const days = Array.from({ length: 7 }, (_, i) => {
     const date = new Date(weekStart)
-    date.setDate(date.getDate() + i)
+    date.setDate(weekStart.getDate() + i)
     return date
   })
 
   const dayNames = days.map(date =>
-    date.toLocaleDateString('en-US', { weekday: 'short' })
+    date.toLocaleDateString('en-MY', { weekday: 'short' }) + ' ' + date.getDate()
   )
 
   // Initialize and fetch schedule data from Supabase
@@ -558,13 +567,31 @@ export default function SchedulePage() {
               <div className="flex items-center gap-3">
                 {viewMode === 'week' ? (
                   <>
-                    <Button variant="ghost" size="sm" className="text-slate-600">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="text-slate-600"
+                      onClick={() => {
+                        const prev = new Date(weekStart)
+                        prev.setDate(prev.getDate() - 7)
+                        setWeekStartDate(prev)
+                      }}
+                    >
                       <ChevronLeft className="w-5 h-5" />
                     </Button>
                     <span className="text-sm font-medium text-slate-900">
                       {weekStart.getDate()} – {weekEnd.getDate()} Apr 2026
                     </span>
-                    <Button variant="ghost" size="sm" className="text-slate-600">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="text-slate-600"
+                      onClick={() => {
+                        const next = new Date(weekStart)
+                        next.setDate(next.getDate() + 7)
+                        setWeekStartDate(next)
+                      }}
+                    >
                       <ChevronRight className="w-5 h-5" />
                     </Button>
                   </>
