@@ -139,27 +139,19 @@ export default function ManagerReportsPage() {
 
         setSupervisors(supCoverage)
 
-        // Build sites with gaps — group by site_id first, then sum
-        const siteMap = new Map((sites || []).map(s => [s.id, s]))
-        const siteTotalsMap = new Map<string, { total: number; filled: number }>()
-        for (const c of (coverage || [])) {
-          const existing = siteTotalsMap.get(c.site_id) || { total: 0, filled: 0 }
-          siteTotalsMap.set(c.site_id, {
-            total: existing.total + c.required_headcount,
-            filled: existing.filled + c.assigned,
-          })
-        }
-
-        const siteGaps: SiteGap[] = Array.from(siteTotalsMap.entries())
-          .map(([siteId, { total, filled }]) => {
-            const site = siteMap.get(siteId)
-            const supervisor = (supSites || []).find(ss => ss.site_id === siteId)?.users?.full_name || 'Unknown'
+        // Build sites with gaps
+        const siteGaps: SiteGap[] = (sites || [])
+          .map(site => {
+            const siteCov = (coverage || []).filter(c => c.site_id === site.id)
+            const total = siteCov.reduce((s, c) => s + c.required_headcount, 0)
+            const filled = siteCov.reduce((s, c) => s + c.assigned, 0)
             const gap = total - filled
             const rate = total > 0 ? Math.round((filled / total) * 100) : 0
+            const supervisor = (supSites || []).find(ss => ss.site_id === site.id)?.users?.full_name || 'Unassigned'
 
             return {
-              code: site?.site_code || 'N/A',
-              name: site?.name || 'Unknown',
+              code: site.site_code,
+              name: site.name,
               supervisor,
               total,
               filled,
@@ -167,6 +159,7 @@ export default function ManagerReportsPage() {
               rate,
             }
           })
+          .filter(s => s.gap > 0)
           .sort((a, b) => a.rate - b.rate)
           .slice(0, 10)
 
