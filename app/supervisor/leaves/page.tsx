@@ -15,7 +15,7 @@ import {
 } from '@/components/ui/table'
 import { LogOut, AlertCircle } from 'lucide-react'
 import { supabase } from '@/lib/supabase/client'
-import { getLocalDateString } from '@/lib/utils'
+import { getLocalDateString, formatLocalDate } from '@/lib/utils'
 
 export default function SupervisorLeavesPage() {
   const router = useRouter()
@@ -131,32 +131,34 @@ export default function SupervisorLeavesPage() {
 
         // CALCULATE SUMMARY STATS from real data
         const today = getLocalDateString()
-        const currentMonth = new Date().getMonth()
-        const currentYear = new Date().getFullYear()
+        const currentDate = new Date()
+        const currentMonth = String(currentDate.getMonth() + 1).padStart(2, '0')
+        const currentYear = currentDate.getFullYear().toString()
 
         const onLeaveToday = leaveRows.filter(
           l => l.leaveDate === today && l.status === 'Approved'
         ).length
 
+        // Compare date strings directly to avoid timezone issues
         const alThisMonth = leaveRows.filter(l => {
-          const leaveDate = new Date(l.leaveDate)
+          const [leaveYear, leaveMonth] = l.leaveDate.split('-')
           return l.leaveType === 'AL' && l.status === 'Approved' &&
-            leaveDate.getMonth() === currentMonth &&
-            leaveDate.getFullYear() === currentYear
+            leaveMonth === currentMonth &&
+            leaveYear === currentYear
         }).length
 
         const mcThisMonth = leaveRows.filter(l => {
-          const leaveDate = new Date(l.leaveDate)
+          const [leaveYear, leaveMonth] = l.leaveDate.split('-')
           return l.leaveType === 'MC' && l.status === 'Approved' &&
-            leaveDate.getMonth() === currentMonth &&
-            leaveDate.getFullYear() === currentYear
+            leaveMonth === currentMonth &&
+            leaveYear === currentYear
         }).length
 
         const elThisMonth = leaveRows.filter(l => {
-          const leaveDate = new Date(l.leaveDate)
+          const [leaveYear, leaveMonth] = l.leaveDate.split('-')
           return l.leaveType === 'EL' && l.status === 'Approved' &&
-            leaveDate.getMonth() === currentMonth &&
-            leaveDate.getFullYear() === currentYear
+            leaveMonth === currentMonth &&
+            leaveYear === currentYear
         }).length
 
         setOnLeaveTodayCount(onLeaveToday)
@@ -196,8 +198,21 @@ export default function SupervisorLeavesPage() {
 
   // Build week view data from allLeaves
   const weekLeaves = allLeaves.filter(leave => {
-    const leaveDate = new Date(leave.leaveDate)
-    return leaveDate >= weekStart && leaveDate < new Date(weekStart.getTime() + 7 * 24 * 60 * 60 * 1000)
+    // Get YYYY-MM-DD strings for both week boundaries and leave date
+    const [leaveYear, leaveMonth, leaveDay] = leave.leaveDate.split('-')
+    const leaveDate = `${leaveYear}-${leaveMonth}-${leaveDay}`
+    
+    const [weekStartYear, weekStartMonth, weekStartDay] = getLocalDateString(weekStart).split('-')
+    const weekStartStr = `${weekStartYear}-${weekStartMonth}-${weekStartDay}`
+    
+    // Calculate week end (7 days later)
+    const weekEnd = new Date(weekStart)
+    weekEnd.setDate(weekEnd.getDate() + 7)
+    const [weekEndYear, weekEndMonth, weekEndDay] = getLocalDateString(weekEnd).split('-')
+    const weekEndStr = `${weekEndYear}-${weekEndMonth}-${weekEndDay}`
+    
+    // Compare date strings directly
+    return leaveDate >= weekStartStr && leaveDate < weekEndStr
   })
 
   // Group by guard
@@ -207,13 +222,23 @@ export default function SupervisorLeavesPage() {
     ).entries()
   ).map(([guardId, leave]) => {
     const guardLeaves: (string | null)[] = Array(7).fill(null)
+    
     weekLeaves
       .filter(l => l.guardId === guardId && l.status === 'Approved')
       .forEach(l => {
-        const leaveDate = new Date(l.leaveDate)
-        const dayIndex = Math.floor((leaveDate.getTime() - weekStart.getTime()) / (24 * 60 * 60 * 1000))
-        if (dayIndex >= 0 && dayIndex < 7) {
-          guardLeaves[dayIndex] = l.leaveType
+        // Compare date strings directly instead of converting to Date objects
+        const [leaveYear, leaveMonth, leaveDay] = l.leaveDate.split('-')
+        const leaveDate = `${leaveYear}-${leaveMonth}-${leaveDay}`
+        
+        for (let i = 0; i < 7; i++) {
+          const dayDate = new Date(weekStart)
+          dayDate.setDate(dayDate.getDate() + i)
+          const dayDateStr = getLocalDateString(dayDate)
+          
+          if (leaveDate === dayDateStr) {
+            guardLeaves[i] = l.leaveType
+            break
+          }
         }
       })
 
@@ -425,11 +450,7 @@ export default function SupervisorLeavesPage() {
                         </Badge>
                       </td>
                       <td className="px-4 py-3 text-sm text-slate-700">
-                        {new Date(leave.leaveDate).toLocaleDateString('en-MY', {
-                          year: 'numeric',
-                          month: 'short',
-                          day: 'numeric',
-                        })}
+                        {formatLocalDate(leave.leaveDate)}
                       </td>
                       <td className="px-4 py-3">
                         <Badge className={`${getStatusBadgeColor(leave.status)} border-0`}>

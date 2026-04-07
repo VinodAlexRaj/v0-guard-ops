@@ -16,3 +16,25 @@ export function getLocalDateString(date: Date = new Date()): string {
   const day = String(date.getDate()).padStart(2, '0')
   return `${year}-${month}-${day}`
 }
+
+/**
+ * Formats a YYYY-MM-DD date string to locale-formatted date.
+ * Parses date parts directly to avoid UTC timezone conversion issues.
+ * @param dateStr - Date string in YYYY-MM-DD format from Supabase
+ * @param options - Optional Intl.DateTimeFormatOptions
+ * @returns Formatted date string (e.g., "9 Apr 2026")
+ */
+export function formatLocalDate(
+  dateStr: string,
+  options?: Intl.DateTimeFormatOptions
+): string {
+  if (!dateStr) return ''
+  // Parse date parts directly to avoid UTC conversion
+  const [year, month, day] = dateStr.split('-').map(Number)
+  const date = new Date(year, month - 1, day) // Local time, no UTC shift
+  return date.toLocaleDateString('en-MY', options || {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+  })
+}
