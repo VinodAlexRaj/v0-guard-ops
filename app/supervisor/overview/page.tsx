@@ -114,7 +114,7 @@ export default function SupervisorOverviewPage() {
 
         const { data: coverage, error: coverageError } = await supabase
           .from('roster_coverage')
-          .select('site_id, shift_definition_id, assigned, required_headcount, is_fulfilled')
+          .select('site_id, assigned, required_headcount, is_fulfilled')
           .in('site_id', siteIds)
           .eq('shift_date', today)
 
@@ -163,28 +163,14 @@ export default function SupervisorOverviewPage() {
           }
         })
 
-        // STEP 4 — ADD SHIFT CHIPS (visual only - does NOT affect numeric calculations)
+        // STEP 4 — ADD SHIFT CHIPS (visual only - show all shifts as amber since roster_coverage doesn't have shift_definition_id)
         siteRows.forEach(siteRow => {
-          const siteCoverage = coverage?.filter(c => c.site_id === siteRow.id) || []
           const siteShiftDefs = shiftDefs?.filter(sd => sd.site_id === siteRow.id) || []
           
-          siteRow.shifts = siteShiftDefs.map(shiftDef => {
-            const covRow = siteCoverage.find(c => c.shift_definition_id === shiftDef.id)
-            let status: 'filled' | 'partial' | 'gap' = 'gap'
-            
-            if (covRow) {
-              if (covRow.assigned > 0 && covRow.is_fulfilled) {
-                status = 'filled'
-              } else if (covRow.assigned > 0) {
-                status = 'partial'
-              }
-            }
-            
-            return {
-              name: shiftDef.shift_name,
-              status,
-            }
-          })
+          siteRow.shifts = siteShiftDefs.map(shiftDef => ({
+            name: shiftDef.shift_name,
+            status: 'partial' as const, // All shifts shown as amber until we can match coverage to shifts
+          }))
         })
 
         setSitesData(siteRows)
