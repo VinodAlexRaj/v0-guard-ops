@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -15,6 +15,17 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { LogOut } from 'lucide-react'
+import { supabase } from '@/lib/supabase/client'
+import { getLocalDateString } from '@/lib/utils'
+
+interface GuardRow {
+  code: string
+  name: string
+  role: string
+  supervisor: string | null
+  status: string
+  joined: string
+}
 
 export default function ManagerGuardsPage() {
   const router = useRouter()
@@ -25,31 +36,158 @@ export default function ManagerGuardsPage() {
   const [editingGuard, setEditingGuard] = useState<any>(null)
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [formValues, setFormValues] = useState<any>({})
+  const [loading, setLoading] = useState(true)
+  const [dateStr, setDateStr] = useState('')
+  const [managerName, setManagerName] = useState('User')
+  const [allStaff, setAllStaff] = useState<GuardRow[]>([])
+  const [supervisors, setSupervisors] = useState<string[]>(['All'])
+  const [totalGuards, setTotalGuards] = useState(0)
+  const [activeGuards, setActiveGuards] = useState(0)
+  const [onLeaveGuards, setOnLeaveGuards] = useState(0)
+  const [inactiveGuards, setInactiveGuards] = useState(0)
 
   const handleSignOut = () => {
     router.push('/')
   }
 
-  const guards = [
-    { code: 'SO0001', name: 'Ahmad Razif', role: 'Security Officer', supervisor: 'Azri Hamdan', status: 'Active', joined: '01 Jan 2024' },
-    { code: 'SO0002', name: 'Siti Norizan', role: 'Security Officer', supervisor: 'Azri Hamdan', status: 'Active', joined: '15 Mar 2024' },
-    { code: 'SN0001', name: 'Rajan Muthu', role: 'Nepalese Security Officer', supervisor: 'Azri Hamdan', status: 'Active', joined: '20 Feb 2024' },
-    { code: 'SO0003', name: 'Kamal Aizuddin', role: 'Security Officer', supervisor: 'Azri Hamdan', status: 'Active', joined: '10 Apr 2024' },
-    { code: 'SO0004', name: 'Nora Baharom', role: 'Security Officer', supervisor: 'Azri Hamdan', status: 'On leave', joined: '05 Jun 2024' },
-    { code: 'SO0005', name: 'Lim Chee Hoe', role: 'Security Officer', supervisor: 'Farah Izzati', status: 'Active', joined: '12 Jul 2024' },
-    { code: 'SO0006', name: 'Hafiz Daud', role: 'Security Officer', supervisor: 'Azri Hamdan', status: 'Active', joined: '30 Aug 2024' },
-    { code: 'SN0002', name: 'Mei Ling', role: 'Nepalese Security Officer', supervisor: 'Azri Hamdan', status: 'Active', joined: '18 Sep 2024' },
-    { code: 'OE0001', name: 'Azri Hamdan', role: 'Operations Executive', supervisor: null, status: 'Active', joined: '01 Jan 2023' },
-    { code: 'OE0002', name: 'Farah Izzati', role: 'Operations Executive', supervisor: null, status: 'Active', joined: '01 Jan 2023' },
-  ]
+  // Set date on mount
+  useEffect(() => {
+    const todayDate = new Date()
+    const formatted = todayDate.toLocaleDateString('en-US', {
+      weekday: 'short',
+      month: 'short',
+      day: '2-digit',
+      year: 'numeric',
+    })
+    setDateStr(formatted)
+  }, [])
 
-  const supervisors = ['All', 'Azri Hamdan', 'Farah Izzati', 'Rajesh Kumar', 'Tan Wei Ling']
-  const roles = ['All', 'Security Officer', 'Nepalese Security Officer', 'Operations Executive']
-  const statuses = ['All', 'Active', 'On leave', 'Inactive']
+  // Fetch guard data
+  useEffect(() => {
+    const fetchGuardData = async () => {
+      try {
+        setLoading(true)
+
+        // FETCH 1 — Get manager name
+        const { data: { user } } = await supabase.auth.getUser()
+        if (user) {
+          const { data: userData } = await supabase
+            .from('users')
+            .select('full_name')
+            .eq('id', user.id)
+            .single()
+          if (userData?.full_name) setManagerName(userData.full_name)
+        }
+
+        // FETCH 2 — Get all guards (no supervisors)
+        const { data: staffData } = await supabase
+          .from('users')
+          .select('id, full_name, external_employee_code, external_role, is_active, created_at')
+          .in('external_role', [
+            'SECURITY OFFICER',
+            'NEPALESE SECURITY OFFICER',
+          ])
+          .order('full_name')
+
+        if (!staffData || staffData.length === 0) {
+          setLoading(false)
+          return
+        }
+
+        // FETCH 3 — Get supervisor to guard mapping via sites
+        const { data: supSites } = await supabase
+          .from('supervisor_sites')
+          .select('supervisor_id, site_id, users!supervisor_sites_supervisor_id_fkey(full_name)')
+
+        const { data: guardAssignments } = await supabase
+          .from('shift_assignments')
+          .select('guard_id, site_id')
+          .eq('is_cancelled', false)
+
+        // FETCH 4 — Get leaves for today
+        const today = getLocalDateString()
+        const { data: leavesData } = await supabase
+          .from('leaves')
+          .select('user_id, leave_status')
+          .eq('leave_date', today)
+          .eq('leave_status', 'Approved')
+
+        // BUILD ROWS
+        const supSiteData = supSites || []
+        const assignData = guardAssignments || []
+        const leaveData = leavesData || []
+
+        const rows: GuardRow[] = (staffData || []).map(staff => {
+          // Find supervisor for this guard via site assignments
+          let supervisor: string | null = null
+          const guardSiteIds = assignData
+            .filter(a => a.guard_id === staff.id)
+            .map(a => a.site_id)
+
+          if (guardSiteIds.length > 0) {
+            const supAssignment = supSiteData.find(ss => guardSiteIds.includes(ss.site_id))
+            if (supAssignment?.users) {
+              supervisor = supAssignment.users.full_name
+            }
+          }
+
+          // Check if on leave today
+          const isOnLeaveToday = leaveData.some(l => l.user_id === staff.id)
+
+          // Determine status
+          let status = 'Active'
+          if (!staff.is_active) {
+            status = 'Inactive'
+          } else if (isOnLeaveToday) {
+            status = 'On leave'
+          }
+
+          // Format date
+          const joinedDate = new Date(staff.created_at)
+          const joined = joinedDate.toLocaleDateString('en-MY', {
+            day: '2-digit',
+            month: 'short',
+            year: 'numeric',
+          })
+
+          return {
+            code: staff.external_employee_code || 'N/A',
+            name: staff.full_name,
+            role: staff.external_role,
+            supervisor,
+            status,
+            joined,
+          }
+        })
+
+        setAllStaff(rows)
+
+        // Calculate summary stats (all rows are guards now)
+        setTotalGuards(rows.length)
+        setActiveGuards(rows.filter(r => r.status === 'Active').length)
+        setOnLeaveGuards(rows.filter(r => r.status === 'On leave').length)
+        setInactiveGuards(rows.filter(r => r.status === 'Inactive').length)
+
+        // Extract unique supervisors for filter
+        const uniqueSupervisors = [
+          'All',
+          ...new Set(rows.filter(r => r.supervisor).map(r => r.supervisor)),
+        ]
+        setSupervisors(uniqueSupervisors as string[])
+      } catch (error) {
+        console.error('[v0] Error fetching guard data:', error)
+      } finally {
+        setLoading(false)
+      }
+    }
+
+    fetchGuardData()
+  }, [router])
 
   const filteredGuards = useMemo(() => {
-    return guards.filter((guard) => {
+    return allStaff.filter((guard) => {
       const matchesSearch =
+        !searchQuery ||
         guard.code.toLowerCase().includes(searchQuery.toLowerCase()) ||
         guard.name.toLowerCase().includes(searchQuery.toLowerCase())
       const matchesSupervisor = supervisorFilter === 'All' || guard.supervisor === supervisorFilter
@@ -57,7 +195,7 @@ export default function ManagerGuardsPage() {
       const matchesStatus = statusFilter === 'All' || guard.status === statusFilter
       return matchesSearch && matchesSupervisor && matchesRole && matchesStatus
     })
-  }, [searchQuery, supervisorFilter, roleFilter, statusFilter])
+  }, [allStaff, searchQuery, supervisorFilter, roleFilter, statusFilter])
 
   const handleEditGuard = (guard: any) => {
     setEditingGuard(guard)
@@ -71,8 +209,8 @@ export default function ManagerGuardsPage() {
   }
 
   const getAvatarColor = (role: string) => {
-    if (role === 'Operations Executive') return 'bg-purple-600'
-    if (role === 'Nepalese Security Officer') return 'bg-blue-600'
+    if (role === 'OPERATIONS EXECUTIVE') return 'bg-purple-600'
+    if (role === 'NEPALESE SECURITY OFFICER') return 'bg-blue-600'
     return 'bg-teal-600'
   }
 
@@ -83,18 +221,10 @@ export default function ManagerGuardsPage() {
   }
 
   const getRoleBadgeColor = (role: string) => {
-    if (role === 'Operations Executive') return 'bg-purple-100 text-purple-700'
-    if (role === 'Nepalese Security Officer') return 'bg-blue-100 text-blue-700'
+    if (role === 'OPERATIONS EXECUTIVE') return 'bg-purple-100 text-purple-700'
+    if (role === 'NEPALESE SECURITY OFFICER') return 'bg-blue-100 text-blue-700'
     return 'bg-teal-100 text-teal-700'
   }
-
-  const todayDate = new Date(2026, 3, 10)
-  const dateStr = todayDate.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: '2-digit', year: 'numeric' })
-
-  const totalGuards = 300
-  const activeGuards = 285
-  const onLeaveGuards = 12
-  const inactiveGuards = 15
 
   return (
     <>
@@ -104,7 +234,7 @@ export default function ManagerGuardsPage() {
           <div className="text-sm text-slate-600">{dateStr}</div>
           <div className="flex items-center gap-4">
             <div className="text-right">
-              <p className="text-sm font-medium text-slate-900">Vinod Alex Raj</p>
+              <p className="text-sm font-medium text-slate-900">{managerName}</p>
               <Badge variant="secondary" className="mt-1">
                 Manager
               </Badge>
@@ -128,7 +258,7 @@ export default function ManagerGuardsPage() {
         <div className="mb-8 flex items-center justify-between">
           <div>
             <h3 className="text-lg font-bold text-slate-900 mb-1">Guard Management</h3>
-            <p className="text-sm text-slate-600">300 guards across 80 sites</p>
+            <p className="text-sm text-slate-600">{totalGuards} guards across your sites</p>
           </div>
           <Input
             type="text"
@@ -165,7 +295,7 @@ export default function ManagerGuardsPage() {
           <div className="flex items-center gap-3">
             <span className="text-sm font-medium text-slate-700 min-w-max">Role:</span>
             <div className="flex gap-2 flex-wrap">
-              {roles.map((role) => (
+              {['All', 'SECURITY OFFICER', 'NEPALESE SECURITY OFFICER'].map((role) => (
                 <button
                   key={role}
                   onClick={() => setRoleFilter(role)}
@@ -175,7 +305,7 @@ export default function ManagerGuardsPage() {
                       : 'bg-slate-200 text-slate-700 hover:bg-slate-300'
                   }`}
                 >
-                  {role}
+                  {role === 'All' ? 'All' : role.replace(/_/g, ' ')}
                 </button>
               ))}
             </div>
@@ -185,7 +315,7 @@ export default function ManagerGuardsPage() {
           <div className="flex items-center gap-3">
             <span className="text-sm font-medium text-slate-700 min-w-max">Status:</span>
             <div className="flex gap-2 flex-wrap">
-              {statuses.map((status) => (
+              {['All', 'Active', 'On leave', 'Inactive'].map((status) => (
                 <button
                   key={status}
                   onClick={() => setStatusFilter(status)}
@@ -224,66 +354,74 @@ export default function ManagerGuardsPage() {
 
         {/* Guards Table */}
         <Card className="border-slate-200 overflow-hidden">
-          <table className="w-full">
-            <thead className="bg-slate-50">
-              <tr className="border-slate-200">
-                <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700">Guard</th>
-                <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700">Role</th>
-                <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700">Supervisor</th>
-                <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700">Status</th>
-                <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700">Joined</th>
-                <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700">Action</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filteredGuards.map((guard) => (
-                <tr key={guard.code} className="border-b border-slate-200 hover:bg-slate-50">
-                  <td className="px-4 py-3">
-                    <div className="flex items-center gap-3">
-                      <div
-                        className={`w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-bold ${getAvatarColor(
-                          guard.role
-                        )}`}
-                      >
-                        {guard.name
-                          .split(' ')
-                          .map((n: string) => n[0])
-                          .join('')
-                          .toUpperCase()
-                          .slice(0, 2)}
-                      </div>
-                      <div>
-                        <div className="text-sm font-medium text-slate-900">{guard.name}</div>
-                        <div className="text-xs text-slate-500">{guard.code}</div>
-                      </div>
-                    </div>
-                  </td>
-                  <td className="px-4 py-3">
-                    <Badge className={`border-0 ${getRoleBadgeColor(guard.role)}`}>{guard.role}</Badge>
-                  </td>
-                  <td className="px-4 py-3">
-                    <span className="text-sm text-slate-700">{guard.supervisor || '—'}</span>
-                  </td>
-                  <td className="px-4 py-3">
-                    <Badge className={`border-0 ${getStatusColor(guard.status)}`}>{guard.status}</Badge>
-                  </td>
-                  <td className="px-4 py-3">
-                    <span className="text-sm text-slate-700">{guard.joined}</span>
-                  </td>
-                  <td className="px-4 py-3">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => handleEditGuard(guard)}
-                      className="text-slate-700 border-slate-300 hover:bg-slate-50"
-                    >
-                      Edit
-                    </Button>
-                  </td>
+          {loading ? (
+            <div className="p-8 text-center text-slate-600">Loading guard data...</div>
+          ) : filteredGuards.length === 0 ? (
+            <div className="p-8 text-center text-slate-600">No guards found matching your filters.</div>
+          ) : (
+            <table className="w-full">
+              <thead className="bg-slate-50">
+                <tr className="border-slate-200">
+                  <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700">Guard</th>
+                  <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700">Role</th>
+                  <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700">Supervisor</th>
+                  <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700">Status</th>
+                  <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700">Joined</th>
+                  <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700">Action</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {filteredGuards.map((guard) => (
+                  <tr key={guard.code} className="border-b border-slate-200 hover:bg-slate-50">
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-3">
+                        <div
+                          className={`w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-bold ${getAvatarColor(
+                            guard.role
+                          )}`}
+                        >
+                          {guard.name
+                            .split(' ')
+                            .map((n: string) => n[0])
+                            .join('')
+                            .toUpperCase()
+                            .slice(0, 2)}
+                        </div>
+                        <div>
+                          <div className="text-sm font-medium text-slate-900">{guard.name}</div>
+                          <div className="text-xs text-slate-500">{guard.code}</div>
+                        </div>
+                      </div>
+                    </td>
+                    <td className="px-4 py-3">
+                      <Badge className={`border-0 ${getRoleBadgeColor(guard.role)}`}>
+                        {guard.role.replace(/_/g, ' ')}
+                      </Badge>
+                    </td>
+                    <td className="px-4 py-3">
+                      <span className="text-sm text-slate-700">{guard.supervisor || '—'}</span>
+                    </td>
+                    <td className="px-4 py-3">
+                      <Badge className={`border-0 ${getStatusColor(guard.status)}`}>{guard.status}</Badge>
+                    </td>
+                    <td className="px-4 py-3">
+                      <span className="text-sm text-slate-700">{guard.joined}</span>
+                    </td>
+                    <td className="px-4 py-3">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => handleEditGuard(guard)}
+                        className="text-slate-700 border-slate-300 hover:bg-slate-50"
+                      >
+                        Edit
+                      </Button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
         </Card>
 
         {/* Footer */}

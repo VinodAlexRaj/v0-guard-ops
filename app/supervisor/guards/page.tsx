@@ -1,20 +1,21 @@
 'use client'
 
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
 import { LogOut, ArrowRight } from 'lucide-react'
+import { supabase } from '@/lib/supabase/client'
+import { getLocalDateString } from '@/lib/utils'
 
 interface Guard {
   id: string
   name: string
   code: string
-  role: 'Guard' | 'Supervisor'
-  status: 'Active' | 'On leave' | 'Inactive'
-  leave?: string
+  status: 'Active' | 'On leave'
+  leaves: Array<{ type: string; date: string }>
   sites: string[]
   initials: string
 }
@@ -23,94 +24,10 @@ export default function GuardsPage() {
   const router = useRouter()
   const [searchQuery, setSearchQuery] = useState('')
   const [statusFilter, setStatusFilter] = useState('All')
-  const [roleFilter, setRoleFilter] = useState('All roles')
-
-  const guards: Guard[] = [
-    {
-      id: '1',
-      name: 'Ahmad Razif',
-      code: 'SO0001',
-      role: 'Guard',
-      status: 'Active',
-      sites: ['KLSNT01', 'PJAYA02'],
-      initials: 'AR',
-    },
-    {
-      id: '2',
-      name: 'Siti Norizan',
-      code: 'SO0002',
-      role: 'Guard',
-      status: 'Active',
-      sites: ['KLSNT01'],
-      initials: 'SN',
-    },
-    {
-      id: '3',
-      name: 'Nora Baharom',
-      code: 'SO0004',
-      role: 'Guard',
-      status: 'On leave',
-      leave: 'AL 10-11 Apr',
-      sites: ['KLSNT01', 'SUBNG05'],
-      initials: 'NB',
-    },
-    {
-      id: '4',
-      name: 'Rajan Muthu',
-      code: 'SN0001',
-      role: 'Guard',
-      status: 'Active',
-      sites: ['KLSNT01', 'AMPNG03'],
-      initials: 'RM',
-    },
-    {
-      id: '5',
-      name: 'Kamal Aizuddin',
-      code: 'SO0003',
-      role: 'Guard',
-      status: 'Active',
-      leave: 'MC 12 Apr',
-      sites: ['PJAYA02'],
-      initials: 'KA',
-    },
-    {
-      id: '6',
-      name: 'Lim Chee Hoe',
-      code: 'SO0005',
-      role: 'Guard',
-      status: 'Active',
-      sites: ['KLSNT01', 'SUBNG05', 'SETIA08'],
-      initials: 'LCH',
-    },
-    {
-      id: '7',
-      name: 'Hafiz Daud',
-      code: 'SO0006',
-      role: 'Guard',
-      status: 'Active',
-      leave: 'EL 13 Apr',
-      sites: ['KLSNT01', 'MONT11'],
-      initials: 'HD',
-    },
-    {
-      id: '8',
-      name: 'Mei Ling',
-      code: 'SN0002',
-      role: 'Guard',
-      status: 'Active',
-      sites: ['KLSNT01'],
-      initials: 'ML',
-    },
-    {
-      id: '9',
-      name: 'Azri Hamdan',
-      code: 'OE0001',
-      role: 'Supervisor',
-      status: 'Active',
-      sites: [],
-      initials: 'AH',
-    },
-  ]
+  const [loading, setLoading] = useState(true)
+  const [dateStr, setDateStr] = useState('')
+  const [guards, setGuards] = useState<Guard[]>([])
+  const [currentUser, setCurrentUser] = useState<any>(null)
 
   const filteredGuards = useMemo(() => {
     return guards.filter((guard) => {
@@ -119,14 +36,10 @@ export default function GuardsPage() {
         guard.code.toLowerCase().includes(searchQuery.toLowerCase())
 
       const matchesStatus = statusFilter === 'All' || guard.status === statusFilter
-      const matchesRole =
-        roleFilter === 'All roles' ||
-        (roleFilter === 'Guard' && guard.role === 'Guard') ||
-        (roleFilter === 'Supervisor' && guard.role === 'Supervisor')
 
-      return matchesSearch && matchesStatus && matchesRole
+      return matchesSearch && matchesStatus
     })
-  }, [searchQuery, statusFilter, roleFilter])
+  }, [searchQuery, statusFilter, guards])
 
   const handleSignOut = () => {
     router.push('/')
@@ -136,24 +49,143 @@ export default function GuardsPage() {
     router.push('/supervisor/sites/KLSNT01/schedule')
   }
 
-  const getLeaveColor = (leave?: string) => {
-    if (!leave) return ''
-    if (leave.startsWith('AL')) return 'bg-purple-100 text-purple-700'
-    if (leave.startsWith('MC')) return 'bg-red-100 text-red-700'
-    if (leave.startsWith('EL')) return 'bg-amber-100 text-amber-700'
-    return ''
+  const getLeaveColor = (leaveType: string) => {
+    if (leaveType.startsWith('AL')) return 'bg-purple-100 text-purple-700'
+    if (leaveType.startsWith('MC')) return 'bg-red-100 text-red-700'
+    if (leaveType.startsWith('EL')) return 'bg-amber-100 text-amber-700'
+    return 'bg-slate-100 text-slate-700'
   }
 
-  const getAvatarColor = (role: string) => {
-    return role === 'Supervisor' ? 'bg-purple-600' : 'bg-teal-600'
+  const getAvatarColor = () => {
+    return 'bg-teal-600'
   }
 
-  const activeCount = guards.filter((g) => g.status === 'Active').length
-  const onLeaveCount = guards.filter((g) => g.status === 'On leave').length
-  const inactiveCount = guards.filter((g) => g.status === 'Inactive').length
+  // Set date string on client-side only
+  useEffect(() => {
+    const todayDate = new Date()
+    const formatted = todayDate.toLocaleDateString('en-US', {
+      weekday: 'short',
+      month: 'short',
+      day: '2-digit',
+      year: 'numeric',
+    })
+    setDateStr(formatted)
+  }, [])
 
-  const todayDate = new Date(2026, 3, 10) // April 10, 2026
-  const dateStr = todayDate.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: '2-digit', year: 'numeric' })
+  // Fetch guards data
+  useEffect(() => {
+    const fetchGuards = async () => {
+      try {
+        setLoading(true)
+
+        // Get current user
+        const { data: { user } } = await supabase.auth.getUser()
+        if (!user) {
+          router.push('/')
+          return
+        }
+        const { data: userData } = await supabase
+          .from('users')
+          .select('id, full_name')
+          .eq('id', user.id)
+          .single()
+        setCurrentUser(userData)
+
+        // FETCH 1 — Get supervisor's sites
+        const { data: supervisorSites } = await supabase
+          .from('supervisor_sites')
+          .select('site_id, sites(site_code)')
+          .eq('supervisor_id', user.id)
+
+        if (!supervisorSites || supervisorSites.length === 0) {
+          setGuards([])
+          setLoading(false)
+          return
+        }
+
+        const siteIds = supervisorSites.map(ss => ss.site_id)
+
+        // FETCH 2 — Get guards assigned to these sites
+        const { data: assignments } = await supabase
+          .from('shift_assignments')
+          .select('guard_id')
+          .in('site_id', siteIds)
+          .eq('is_cancelled', false)
+
+        const guardIds = [...new Set(assignments?.map(a => a.guard_id) || [])]
+
+        if (guardIds.length === 0) {
+          setGuards([])
+          setLoading(false)
+          return
+        }
+
+        // FETCH 3 — Get guard details
+        const { data: guardDetails } = await supabase
+          .from('users')
+          .select('id, full_name, external_employee_code, external_role, is_active')
+          .in('id', guardIds)
+          .in('external_role', ['SECURITY OFFICER', 'NEPALESE SECURITY OFFICER'])
+
+        // FETCH 4 — Get leaves for this week and today
+        const today = getLocalDateString()
+        const { data: leaves } = await supabase
+          .from('leaves')
+          .select('user_id, leave_type, leave_status, leave_date')
+          .in('user_id', guardIds)
+          .eq('leave_status', 'Approved')
+          .gte('leave_date', today)
+
+        // FETCH 5 — Get all assignments to get site codes
+        const { data: allAssignments } = await supabase
+          .from('shift_assignments')
+          .select('guard_id, sites(site_code)')
+          .in('guard_id', guardIds)
+          .eq('is_cancelled', false)
+
+        // BUILD TABLE ROWS
+        const guardsArray: Guard[] = (guardDetails || []).map(guard => {
+          const guardLeaves = leaves?.filter(l => l.user_id === guard.id) || []
+          const guardAssignments = allAssignments?.filter(a => a.guard_id === guard.id) || []
+          const siteCodes = [...new Set(guardAssignments.map(a => a.sites?.site_code).filter(Boolean))]
+
+          // Check if guard is on leave today
+          const leavesToday = guardLeaves.filter(l => l.leave_date === today)
+          const isOnLeaveToday = leavesToday.length > 0
+
+          // Format leaves this week
+          const formattedLeaves = guardLeaves.map(l => ({
+            type: l.leave_type,
+            date: l.leave_date,
+          }))
+
+          // Get initials
+          const nameParts = guard.full_name.split(' ')
+          const initials = nameParts.length >= 2
+            ? (nameParts[0][0] + nameParts[1][0]).toUpperCase()
+            : guard.full_name.substring(0, 2).toUpperCase()
+
+          return {
+            id: guard.id,
+            name: guard.full_name,
+            code: guard.external_employee_code,
+            status: guard.is_active && isOnLeaveToday ? 'On leave' : guard.is_active ? 'Active' : 'On leave',
+            leaves: formattedLeaves,
+            sites: siteCodes,
+            initials,
+          }
+        })
+
+        setGuards(guardsArray)
+      } catch (error) {
+        console.error('[v0] Error fetching guards:', error)
+      } finally {
+        setLoading(false)
+      }
+    }
+
+    fetchGuards()
+  }, [router])
 
   return (
     <>
@@ -163,7 +195,7 @@ export default function GuardsPage() {
           <div className="text-sm text-slate-600">{dateStr}</div>
           <div className="flex items-center gap-4">
             <div className="text-right">
-              <p className="text-sm font-medium text-slate-900">Azri Hamdan</p>
+              <p className="text-sm font-medium text-slate-900">{currentUser?.full_name || 'User'}</p>
               <Badge variant="secondary" className="mt-1">
                 Supervisor
               </Badge>
@@ -187,7 +219,7 @@ export default function GuardsPage() {
         <div className="mb-8 flex items-center justify-between">
           <div>
             <h3 className="text-lg font-bold text-slate-900 mb-1">Guards</h3>
-            <p className="text-sm text-slate-600">64 guards across your 22 sites</p>
+            <p className="text-sm text-slate-600">{guards.length} guards across your sites</p>
           </div>
           <Input
             type="text"
@@ -198,13 +230,13 @@ export default function GuardsPage() {
           />
         </div>
 
-        {/* Filter Bars */}
+        {/* Filter Bar */}
         <div className="mb-4 flex gap-6">
           {/* Status Filter */}
           <div className="flex items-center gap-2">
             <span className="text-sm font-medium text-slate-700">Status:</span>
             <div className="flex gap-2">
-              {['All', 'Active', 'On leave', 'Inactive'].map((status) => (
+              {['All', 'Active', 'On leave'].map((status) => (
                 <button
                   key={status}
                   onClick={() => setStatusFilter(status)}
@@ -219,56 +251,38 @@ export default function GuardsPage() {
               ))}
             </div>
           </div>
-
-          {/* Role Filter */}
-          <div className="flex items-center gap-2">
-            <span className="text-sm font-medium text-slate-700">Role:</span>
-            <div className="flex gap-2">
-              {['All roles', 'Guard', 'Supervisor'].map((role) => (
-                <button
-                  key={role}
-                  onClick={() => setRoleFilter(role)}
-                  className={`px-4 py-2 rounded-full text-sm font-medium transition ${
-                    roleFilter === role
-                      ? 'bg-teal-600 text-white'
-                      : 'bg-slate-200 text-slate-700 hover:bg-slate-300'
-                  }`}
-                >
-                  {role}
-                </button>
-              ))}
-            </div>
-          </div>
         </div>
 
         {/* Guards Table */}
         <Card className="border-slate-200 overflow-hidden">
-          <table className="w-full">
-            <thead className="bg-slate-50">
-              <tr className="border-slate-200">
-                <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700">Guard</th>
-                <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700">Role</th>
-                <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700">Status</th>
-                <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700">Leave this week</th>
-                <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700">Assigned sites</th>
-                <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700">Action</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filteredGuards.map((guard) => {
-                const isInactive = guard.status === 'Inactive'
-                return (
+          {loading ? (
+            <div className="p-8 text-center text-slate-600">Loading guards...</div>
+          ) : filteredGuards.length === 0 ? (
+            <div className="p-8 text-center text-slate-600">
+              {guards.length === 0 ? 'No guards found' : 'No guards match your search'}
+            </div>
+          ) : (
+            <table className="w-full">
+              <thead className="bg-slate-50">
+                <tr className="border-slate-200">
+                  <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700">Guard</th>
+                  <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700">Status</th>
+                  <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700">Leave this week</th>
+                  <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700">Assigned sites</th>
+                  <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700">Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredGuards.map((guard) => (
                   <tr
                     key={guard.id}
-                    className={`border-b border-slate-200 hover:bg-slate-50 ${isInactive ? 'opacity-50' : ''}`}
+                    className="border-b border-slate-200 hover:bg-slate-50"
                   >
                     {/* Guard Name + Code */}
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-3">
                         <div
-                          className={`w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-bold ${getAvatarColor(
-                            guard.role
-                          )}`}
+                          className={`w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-bold ${getAvatarColor()}`}
                         >
                           {guard.initials}
                         </div>
@@ -279,28 +293,13 @@ export default function GuardsPage() {
                       </div>
                     </td>
 
-                    {/* Role */}
-                    <td className="px-4 py-3">
-                      <Badge
-                        className={`${
-                          guard.role === 'Supervisor'
-                            ? 'bg-purple-100 text-purple-700'
-                            : 'bg-teal-100 text-teal-700'
-                        } border-0`}
-                      >
-                        {guard.role}
-                      </Badge>
-                    </td>
-
                     {/* Status */}
                     <td className="px-4 py-3">
                       <Badge
                         className={`border-0 ${
                           guard.status === 'Active'
                             ? 'bg-green-100 text-green-700'
-                            : guard.status === 'On leave'
-                              ? 'bg-amber-100 text-amber-700'
-                              : 'bg-slate-200 text-slate-700'
+                            : 'bg-amber-100 text-amber-700'
                         }`}
                       >
                         {guard.status}
@@ -309,8 +308,14 @@ export default function GuardsPage() {
 
                     {/* Leave */}
                     <td className="px-4 py-3">
-                      {guard.leave ? (
-                        <Badge className={`border-0 ${getLeaveColor(guard.leave)}`}>{guard.leave}</Badge>
+                      {guard.leaves.length > 0 ? (
+                        <div className="flex flex-wrap gap-1">
+                          {guard.leaves.map((leave, idx) => (
+                            <Badge key={idx} className={`border-0 ${getLeaveColor(leave.type)}`}>
+                              {leave.type} {leave.date}
+                            </Badge>
+                          ))}
+                        </div>
                       ) : (
                         <span className="text-slate-400">—</span>
                       )}
@@ -318,9 +323,7 @@ export default function GuardsPage() {
 
                     {/* Sites */}
                     <td className="px-4 py-3">
-                      {guard.role === 'Supervisor' ? (
-                        <span className="text-sm text-slate-700">22 sites</span>
-                      ) : (
+                      {guard.sites.length > 0 ? (
                         <div className="flex flex-wrap gap-1">
                           {guard.sites.map((site) => (
                             <Badge key={site} variant="outline" className="bg-slate-50 text-slate-700">
@@ -328,6 +331,8 @@ export default function GuardsPage() {
                             </Badge>
                           ))}
                         </div>
+                      ) : (
+                        <span className="text-slate-400">—</span>
                       )}
                     </td>
 
@@ -343,27 +348,23 @@ export default function GuardsPage() {
                       </Button>
                     </td>
                   </tr>
-                )
-              })}
-            </tbody>
-          </table>
+                ))}
+              </tbody>
+            </table>
+          )}
         </Card>
 
         {/* Footer */}
         <div className="mt-4 flex items-center justify-between">
-          <span className="text-sm text-slate-600">Showing {filteredGuards.length} of 64 guards</span>
+          <span className="text-sm text-slate-600">Showing {filteredGuards.length} of {guards.length} guards</span>
           <div className="flex gap-6 text-sm font-medium">
             <div className="flex items-center gap-2">
               <div className="w-2 h-2 rounded-full bg-green-600"></div>
-              <span className="text-green-600">{activeCount} active</span>
+              <span className="text-green-600">{guards.filter(g => g.status === 'Active').length} active</span>
             </div>
             <div className="flex items-center gap-2">
               <div className="w-2 h-2 rounded-full bg-amber-600"></div>
-              <span className="text-amber-600">{onLeaveCount} on leave</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <div className="w-2 h-2 rounded-full bg-slate-400"></div>
-              <span className="text-slate-600">{inactiveCount} inactive</span>
+              <span className="text-amber-600">{guards.filter(g => g.status === 'On leave').length} on leave</span>
             </div>
           </div>
         </div>
