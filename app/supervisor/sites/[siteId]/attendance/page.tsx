@@ -106,54 +106,62 @@ export default function AttendancePage() {
 
         // 4. Get assignments for today's slots
         const slotIds = slots.map(s => s.id)
-        const { data: assignments } = await supabase
+        const { data: assignments, error: assignError } = await supabase
           .from('shift_assignments')
-          .select(`
-            id,
-            roster_slot_id,
-            guard_id,
-            users (
-              id,
-              full_name,
-              external_employee_code
-            )
-          `)
+          .select('id, roster_slot_id, guard_id')
           .in('roster_slot_id', slotIds)
           .eq('is_cancelled', false)
 
         console.log('[v0] ASSIGNMENTS:', assignments)
+        console.log('[v0] ASSIGN ERROR:', assignError)
 
         if (!assignments) return
 
-        // 5. Get existing attendance records
+        // 5. Get guard details separately
+        const guardIds = [...new Set(assignments?.map(a => a.guard_id) || [])]
+
+        const { data: guardDetails } = await supabase
+          .from('users')
+          .select('id, full_name, external_employee_code')
+          .in('id', guardIds)
+
+        console.log('[v0] GUARD DETAILS:', guardDetails)
+
+        // 6. Get existing attendance records
         const assignmentIds = assignments.map(a => a.id)
-        const { data: attendanceRecords } = await supabase
+        const { data: existingAttendance } = await supabase
           .from('attendance')
           .select('*')
           .in('shift_assignment_id', assignmentIds)
 
-        console.log('[v0] EXISTING ATTENDANCE:', attendanceRecords)
+        console.log('[v0] EXISTING ATTENDANCE:', existingAttendance)
 
-        // 6. Build rows with attendance data
-        const rows: AttendanceRow[] = assignments.map((assignment: any) => {
+        // 7. Build rows by combining assignments, guards, and attendance
+        const rows: AttendanceRow[] = (assignments || []).map(assignment => {
           const slot = slots.find(s => s.id === assignment.roster_slot_id)
-          const shiftDef = shiftDefs?.find(sd => sd.id === slot?.shift_definition_id)
-          const attendanceRecord = attendanceRecords?.find(ar => ar.shift_assignment_id === assignment.id)
+          const guard = guardDetails?.find(g => g.id === assignment.guard_id)
+          const existing = existingAttendance?.find(
+            a => a.shift_assignment_id === assignment.id
+          )
 
           return {
             id: `${assignment.id}`,
             assignmentId: assignment.id,
             guardId: assignment.guard_id,
-            name: assignment.users?.full_name || 'Unknown',
-            code: assignment.users?.external_employee_code || 'N/A',
-            checkIn: attendanceRecord?.check_in_time?.slice(0, 5) || '',
-            checkOut: attendanceRecord?.check_out_time?.slice(0, 5) || '',
-            status: attendanceRecord?.status || null,
-            remarks: attendanceRecord?.remarks || '',
-            otMins: attendanceRecord?.overtime_minutes || 0,
-            otReason: attendanceRecord?.overtime_reason || '',
-            saved: !!attendanceRecord,
-            shiftEndTime: shiftDef?.end_time?.slice(0, 5) || '14:00',
+            name: guard?.full_name || 'Unknown',
+            code: guard?.external_employee_code || 'N/A',
+            checkIn: existing?.check_in_time
+              ? new Date(existing.check_in_time).toTimeString().slice(0, 5)
+              : '',
+            checkOut: existing?.check_out_time
+              ? new Date(existing.check_out_time).toTimeString().slice(0, 5)
+              : '',
+            status: existing?.status || null,
+            remarks: existing?.remarks || '',
+            otMins: existing?.overtime_minutes || 0,
+            otReason: existing?.overtime_reason || '',
+            saved: !!existing,
+            shiftEndTime: shiftDefs?.find(sd => sd.id === slot?.shift_definition_id)?.end_time?.slice(0, 5) || '14:00',
           }
         })
 
