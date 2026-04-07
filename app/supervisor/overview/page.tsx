@@ -16,19 +16,23 @@ import {
 } from '@/components/ui/table'
 import { LogOut, AlertCircle, PieChart } from 'lucide-react'
 
+interface SiteRow {
+  code: string
+  name: string
+  id: string
+  totalRequired: number
+  totalAssigned: number
+  fillRate: number
+  openSlots: number
+  shifts: ShiftStatus[]
+}
+
 interface ShiftStatus {
   name: string
   status: 'filled' | 'partial' | 'gap'
 }
 
-interface SiteData {
-  code: string
-  name: string
-  id: string
-  shifts: ShiftStatus[]
-  fillRate: number
-  openSlots: number
-}
+interface SiteData extends SiteRow {}
 
 interface AbsentGuard {
   name: string
@@ -122,19 +126,35 @@ export default function SupervisorOverviewPage() {
           .eq('status', 'absent')
           .in('shift_assignments.site_id', siteIds)
 
-        // STEP 3 — Build site rows using siteMap for names
-        const siteRows: SiteData[] = Object.values(siteMap).map(site => {
+        // STEP 3 — BUILD SITE ROWS (coverage-based calculations only)
+        const siteRows: SiteRow[] = Object.values(siteMap).map(site => {
           const siteCoverage = coverage?.filter(c => c.site_id === site.id) || []
           const totalRequired = siteCoverage.reduce((sum, c) => sum + c.required_headcount, 0)
           const totalAssigned = siteCoverage.reduce((sum, c) => sum + c.assigned, 0)
           const openSlots = totalRequired - totalAssigned
           const fillRate = totalRequired > 0 ? Math.round((totalAssigned / totalRequired) * 100) : 0
 
-          // Build shifts array for this site
-          const siteShiftDefs = shiftDefs?.filter(sd => sd.site_id === site.id) || []
-          const shifts: ShiftStatus[] = siteShiftDefs.map(shiftDef => {
+          return {
+            code: site.code,
+            name: site.name,
+            id: site.id,
+            totalRequired,
+            totalAssigned,
+            fillRate,
+            openSlots,
+            shifts: [], // Placeholder - will be filled in STEP 4
+          }
+        })
+
+        // STEP 4 — ADD SHIFT CHIPS (visual only - does NOT affect numeric calculations)
+        siteRows.forEach(siteRow => {
+          const siteCoverage = coverage?.filter(c => c.site_id === siteRow.id) || []
+          const siteShiftDefs = shiftDefs?.filter(sd => sd.site_id === siteRow.id) || []
+          
+          siteRow.shifts = siteShiftDefs.map(shiftDef => {
             const covRow = siteCoverage.find(c => c.shift_definition_id === shiftDef.id)
             let status: 'filled' | 'partial' | 'gap' = 'gap'
+            
             if (covRow) {
               if (covRow.assigned > 0 && covRow.is_fulfilled) {
                 status = 'filled'
@@ -142,30 +162,22 @@ export default function SupervisorOverviewPage() {
                 status = 'partial'
               }
             }
+            
             return {
               name: shiftDef.shift_name,
               status,
             }
           })
-
-          return {
-            code: site.code,
-            name: site.name,
-            id: site.id,
-            shifts,
-            fillRate,
-            openSlots,
-          }
         })
 
         setSitesData(siteRows)
 
-        // STEP 4 — Calculate stat cards
+        // STEP 5 — Calculate stat cards from siteRows (after all numeric calculations are done)
         const sitesWithGaps = siteRows.filter(s => s.openSlots > 0).length
         const totalUnfilled = siteRows.reduce((sum, s) => sum + s.openSlots, 0)
-        const totalRequired = coverage?.reduce((sum, c) => sum + c.required_headcount, 0) || 0
-        const totalAssigned = coverage?.reduce((sum, c) => sum + c.assigned, 0) || 0
-        const overallFillRate = totalRequired > 0 ? Math.round((totalAssigned / totalRequired) * 100) : 0
+        const globalTotalRequired = siteRows.reduce((sum, s) => sum + s.totalRequired, 0)
+        const globalTotalAssigned = siteRows.reduce((sum, s) => sum + s.totalAssigned, 0)
+        const overallFillRate = globalTotalRequired > 0 ? Math.round((globalTotalAssigned / globalTotalRequired) * 100) : 0
 
         setStats([
           { ...stats[0], value: sitesWithGaps },
