@@ -45,6 +45,7 @@ export default function ManagerGuardsPage() {
   const [activeGuards, setActiveGuards] = useState(0)
   const [onLeaveGuards, setOnLeaveGuards] = useState(0)
   const [inactiveGuards, setInactiveGuards] = useState(0)
+  const [totalSupervisors, setTotalSupervisors] = useState(0)
 
   const handleSignOut = () => {
     router.push('/')
@@ -171,14 +172,16 @@ export default function ManagerGuardsPage() {
         const guards = rows.filter(r =>
           r.role === 'SECURITY OFFICER' || r.role === 'NEPALESE SECURITY OFFICER'
         )
-        const active = rows.filter(r => r.status === 'Active').length
-        const onLeave = rows.filter(r => r.status === 'On leave').length
-        const inactive = rows.filter(r => r.status === 'Inactive').length
+        const active = guards.filter(r => r.status === 'Active').length
+        const onLeave = guards.filter(r => r.status === 'On leave').length
+        const inactive = guards.filter(r => r.status === 'Inactive').length
+        const supervisors = rows.filter(r => r.role === 'OPERATIONS EXECUTIVE').length
 
         setTotalGuards(guards.length)
         setActiveGuards(active)
         setOnLeaveGuards(onLeave)
         setInactiveGuards(inactive)
+        setTotalSupervisors(supervisors)
 
         // Extract unique supervisors
         const uniqueSupervisors = [
@@ -274,7 +277,7 @@ export default function ManagerGuardsPage() {
         <div className="mb-8 flex items-center justify-between">
           <div>
             <h3 className="text-lg font-bold text-slate-900 mb-1">Guard Management</h3>
-            <p className="text-sm text-slate-600">{totalGuards} guards across {supervisors.length - 1} supervisors</p>
+            <p className="text-sm text-slate-600">{totalGuards} guards and {totalSupervisors} supervisors</p>
           </div>
           <Input
             type="text"
@@ -441,7 +444,7 @@ export default function ManagerGuardsPage() {
         </Card>
 
         {/* Footer */}
-        <div className="mt-4 text-sm text-slate-600">Showing {filteredGuards.length} of {totalGuards} guards</div>
+        <div className="mt-4 text-sm text-slate-600">Showing {filteredGuards.filter(g => g.role === 'SECURITY OFFICER' || g.role === 'NEPALESE SECURITY OFFICER').length} of {totalGuards} guards</div>
       </div>
 
       {/* Edit Modal */}
