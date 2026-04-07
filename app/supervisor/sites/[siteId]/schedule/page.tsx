@@ -14,17 +14,24 @@ export default function SchedulePage() {
   const params = useParams()
   const siteId = params.siteId as string
 
+  // Helper function to get the Monday of the current week
+  const getWeekStart = (date: Date) => {
+    const d = new Date(date)
+    const day = d.getDay() // 0=Sun, 1=Mon, 2=Tue...
+    // If Sunday (0), go back 6 days to Monday
+    // Otherwise go back (day - 1) days to Monday
+    const diff = day === 0 ? -6 : 1 - day
+    d.setDate(d.getDate() + diff)
+    d.setHours(0, 0, 0, 0)
+    return d
+  }
+
   // State for transformed data
   const [viewMode, setViewMode] = useState<'week' | 'day'>('week')
   const [weekStartDate, setWeekStartDate] = useState<Date>(() => {
-    const d = new Date(2026, 3, 10) // April 10, 2026 (Thursday)
-    const day = d.getDay() // 0=Sun, 1=Mon, 2=Tue...
-    const diff = d.getDate() - day + (day === 0 ? -6 : 1)
-    d.setDate(diff)
-    d.setHours(0, 0, 0, 0)
-    return d
+    return getWeekStart(new Date(2026, 3, 7)) // April 7, 2026 (Tuesday)
   })
-  const [dayViewDate, setDayViewDate] = useState<Date>(new Date(2026, 3, 10)) // default to today
+  const [dayViewDate, setDayViewDate] = useState<Date>(new Date(2026, 3, 7)) // default to today (Tue Apr 7)
   const [selectedCell, setSelectedCell] = useState({ shiftIndex: 1, dayIndex: 2 }) // Wed Afternoon pre-selected
   const [selectedSlot, setSelectedSlot] = useState<any | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
@@ -55,7 +62,7 @@ export default function SchedulePage() {
   const weekStart = weekStartDate
   const weekEnd = new Date(weekStart)
   weekEnd.setDate(weekEnd.getDate() + 6) // 6 days after Monday = Sunday
-  const today = new Date(2026, 3, 10) // April 10, 2026 (Thursday)
+  const today = new Date(2026, 3, 7) // April 7, 2026 (Tuesday)
 
   const shifts = [
     { name: 'Morning', code: 'MRN', time: '06:00-14:00', required: 3 },
@@ -69,9 +76,11 @@ export default function SchedulePage() {
     return date
   })
 
-  const dayNames = days.map(date =>
-    date.toLocaleDateString('en-MY', { weekday: 'short' }) + ' ' + date.getDate()
-  )
+  const dayNames = days.map(date => {
+    const dayName = date.toLocaleDateString('en-MY', { weekday: 'short' })
+    const dayNum = date.getDate()
+    return `${dayName} ${dayNum}`
+  })
 
   // Initialize and fetch schedule data from Supabase
   useEffect(() => {
@@ -662,7 +671,7 @@ export default function SchedulePage() {
                           className={`p-3 rounded-lg border ${isToday ? 'bg-blue-50 border-blue-200' : 'bg-white border-slate-200'}`}
                         >
                           <div className="text-xs font-semibold text-slate-700 mb-2">
-                            {dayNames[idx]} {day.getDate()}
+                            {dayNames[idx]}
                           </div>
                           <div className={`text-lg font-bold ${getCoverageColor(coverage)}`}>{coverage}%</div>
                         </div>
