@@ -753,7 +753,11 @@ export default function SchedulePage() {
                       {/* Guard List */}
                       <div className="space-y-2 mb-4 max-h-48 overflow-y-auto">
                         {filteredGuards.map((guard) => {
-                          const isDisabled = guard.status !== 'available'
+                          // Check if guard is already assigned to selected slot
+                          const isAlreadyAssigned = selectedSlot && assignments.some(
+                            a => a.guard_id === guard.id && a.roster_slot_id === selectedSlot.id
+                          )
+                          const isDisabled = guard.status !== 'available' || isAlreadyAssigned
                           const isSelected = selectedGuard?.id === guard.id
                           return (
                             <button
@@ -770,7 +774,9 @@ export default function SchedulePage() {
                             >
                               <div className="flex items-center justify-between">
                                 <span>{guard.full_name}</span>
-                                {guard.status !== 'available' && (
+                                {isAlreadyAssigned ? (
+                                  <span className="text-xs text-green-600">(assigned)</span>
+                                ) : guard.status !== 'available' && (
                                   <span className="text-xs text-slate-500">({guard.status})</span>
                                 )}
                               </div>
