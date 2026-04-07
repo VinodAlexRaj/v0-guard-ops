@@ -17,8 +17,6 @@ export default function SchedulePage() {
   // State for transformed data
   const [selectedCell, setSelectedCell] = useState({ shiftIndex: 1, dayIndex: 2 }) // Wed Afternoon pre-selected
   const [selectedSlot, setSelectedSlot] = useState<any | null>(null)
-  const [assignmentType, setAssignmentType] = useState('Planned')
-  const [adhocReason, setAdhocReason] = useState('')
   const [searchQuery, setSearchQuery] = useState('')
   const [selectedGuard, setSelectedGuard] = useState<{ id: string; full_name: string; status: string } | null>(null)
   const [loading, setLoading] = useState(true)
@@ -205,38 +203,14 @@ export default function SchedulePage() {
         return
       }
 
-      // Map UI display values to exact database enum values
-      const typeMap: Record<string, string> = {
-        'Planned': 'planned',
-        'Replace': 'replacement',
-        'Ad-hoc': 'adhoc'
-      }
-      const dbAssignmentType = typeMap[assignmentType] || 'planned'
-
-      // Validate ad-hoc requires a reason
-      if (dbAssignmentType === 'adhoc' && !adhocReason.trim()) {
-        alert('Ad-hoc assignments require a reason')
-        return
-      }
-
-      console.log('[v0] Saving assignment:', {
-        roster_slot_id: fullSlot.id,
-        site_id: siteUUID,
-        guard_id: selectedGuard.id,
-        start_time: fullSlot.start_time,
-        end_time: fullSlot.end_time,
-        assignment_type: dbAssignmentType,
-        reason: dbAssignmentType === 'adhoc' ? adhocReason.trim() : null
-      })
-
       const { error } = await supabase.from('shift_assignments').insert({
         roster_slot_id: fullSlot.id,
         site_id: siteUUID,
         guard_id: selectedGuard.id,
         start_time: fullSlot.start_time,
         end_time: fullSlot.end_time,
-        assignment_type: dbAssignmentType,
-        reason: dbAssignmentType === 'adhoc' ? adhocReason.trim() : null,
+        assignment_type: 'planned',
+        reason: null,
         is_cancelled: false,
       })
 
@@ -248,7 +222,6 @@ export default function SchedulePage() {
 
       setSelectedGuard(null)
       setSearchQuery('')
-      setAdhocReason('')
       await fetchSchedule(siteUUID)
     } catch (err) {
       console.error('[v0] Error saving assignment:', err)
@@ -728,35 +701,7 @@ export default function SchedulePage() {
                     <div>
                       <h4 className="text-sm font-semibold text-slate-900 mb-3">Add guard</h4>
 
-                      {/* Type Toggle */}
-                      <div className="flex gap-2 mb-4">
-                        {['Planned', 'Replace', 'Ad-hoc'].map((type) => (
-                          <button
-                            key={type}
-                            onClick={() => setAssignmentType(type)}
-                            className={`flex-1 px-2 py-2 rounded text-xs font-medium transition ${
-                              assignmentType === type
-                                ? 'bg-teal-600 text-white'
-                                : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
-                            }`}
-                          >
-                            {type}
-                          </button>
-  ))}
-  </div>
-
-  {/* Ad-hoc Reason Input */}
-  {assignmentType === 'Ad-hoc' && (
-    <Input
-      type="text"
-      placeholder="Reason for ad-hoc assignment (required)"
-      value={adhocReason}
-      onChange={(e) => setAdhocReason(e.target.value)}
-      className="mb-4 text-sm"
-    />
-  )}
-  
-  {/* Search Input */}
+                      {/* Search Input */}
                       <Input
                         type="text"
                         placeholder="Search guards..."
