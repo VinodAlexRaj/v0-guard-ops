@@ -290,7 +290,8 @@ export default function SchedulePage() {
     if (message.includes('Headcount exceeded')) return 'This slot is already full.'
     if (message.includes('Guard is on approved leave')) return 'This guard is on approved leave on that date.'
     if (message.includes('Invalid assignment')) return 'The assignment falls outside the slot time window.'
-    if (message.includes('No double booking')) return 'This guard is already assigned during that time.'
+    if (message.includes('no_double_booking') || message.includes('No double booking')) return 'This guard is already assigned to another shift at this time.'
+    if (message.includes('adhoc_validation')) return 'Ad-hoc assignments require a reason.'
     return message
   }
 
