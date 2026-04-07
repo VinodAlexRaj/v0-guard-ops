@@ -1,29 +1,14 @@
 'use client'
 
-import { useState, useEffect } from 'react'
 import { usePathname } from 'next/navigation'
 import Link from 'next/link'
 import { LayoutDashboard, MapPin, CalendarDays, ClipboardList, ShieldCheck, CalendarOff, PanelLeftClose, PanelLeftOpen } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { useSidebar } from '@/components/sidebar-context'
 
 export default function SupervisorSidebar() {
   const pathname = usePathname()
-  const [isCollapsed, setIsCollapsed] = useState(false)
-  const [isMounted, setIsMounted] = useState(false)
-
-  // Load collapsed state from localStorage on mount
-  useEffect(() => {
-    setIsMounted(true)
-    const saved = localStorage.getItem('supervisor-sidebar-collapsed')
-    if (saved) setIsCollapsed(JSON.parse(saved))
-  }, [])
-
-  // Save collapsed state to localStorage
-  const handleToggle = () => {
-    const newState = !isCollapsed
-    setIsCollapsed(newState)
-    localStorage.setItem('supervisor-sidebar-collapsed', JSON.stringify(newState))
-  }
+  const { isCollapsed, toggle } = useSidebar()
 
   const navItems = [
     { label: 'Overview', href: '/supervisor/overview', icon: LayoutDashboard },
@@ -56,20 +41,18 @@ export default function SupervisorSidebar() {
     return false
   }
 
-  if (!isMounted) return null
-
   const ToggleIcon = isCollapsed ? PanelLeftOpen : PanelLeftClose
 
   return (
-    <aside className={`fixed left-0 top-0 h-screen border-r border-slate-200 bg-white transition-all duration-300 ease-in-out ${
-      isCollapsed ? 'w-14' : 'w-64'
+    <aside className={`sticky top-0 h-screen flex-shrink-0 border-r border-slate-200 bg-white transition-all duration-300 ease-in-out ${
+      isCollapsed ? 'w-14' : 'w-56'
     }`}>
       {/* Toggle Button */}
       <div className="p-3">
         <Button
           variant="ghost"
           size="sm"
-          onClick={handleToggle}
+          onClick={toggle}
           className="w-full flex justify-center"
           title={isCollapsed ? 'Expand' : 'Collapse'}
         >
