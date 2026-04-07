@@ -138,6 +138,7 @@ export default function ManagerSitesPage() {
           }
         })
 
+        console.log('[v0] BUILT ROWS:', rows)
         setAllSites(rows)
 
         // Calculate summary stats
@@ -163,8 +164,12 @@ export default function ManagerSitesPage() {
 
   // Filter and search
   const filteredSites = useMemo(() => {
-    return allSites.filter((site) => {
+    console.log('[v0] allSites:', allSites)
+    console.log('[v0] searchQuery:', searchQuery, 'supervisorFilter:', supervisorFilter, 'statusFilter:', statusFilter)
+    
+    const filtered = allSites.filter((site) => {
       const matchesSearch =
+        !searchQuery ||
         site.code.toLowerCase().includes(searchQuery.toLowerCase()) ||
         site.name.toLowerCase().includes(searchQuery.toLowerCase())
 
@@ -173,7 +178,10 @@ export default function ManagerSitesPage() {
 
       return matchesSearch && matchesSupervisor && matchesStatus
     })
-  }, [searchQuery, supervisorFilter, statusFilter])
+
+    console.log('[v0] filteredSites:', filtered)
+    return filtered
+  }, [allSites, searchQuery, supervisorFilter, statusFilter])
 
   const getFillRateColor = (rate: number) => {
     if (rate >= 80) return 'bg-green-100 text-green-700 border-0'
