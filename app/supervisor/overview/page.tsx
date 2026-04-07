@@ -19,8 +19,6 @@ import { LogOut, AlertCircle, PieChart } from 'lucide-react'
 interface SiteData {
   code: string
   name: string
-  id: string
-  shifts: Array<{ name: string; status: 'gap' | 'partial' | 'filled' }>
   fillRate: number
   openSlots: number
 }
@@ -62,10 +60,10 @@ export default function SupervisorOverviewPage() {
           setCurrentUser(userData)
         }
 
-        // FETCH 1 — Get supervisor's sites
+        // STEP 1 — Fetch supervisor's sites with names
         const { data: supervisorSites } = await supabase
           .from('supervisor_sites')
-          .select('site_id, sites(id, site_code)')
+          .select('site_id, sites(id, site_code, name)')
           .eq('supervisor_id', user?.id)
 
         if (!supervisorSites || supervisorSites.length === 0) {
@@ -75,24 +73,27 @@ export default function SupervisorOverviewPage() {
           return
         }
 
+        // Build a lookup map: site_id -> site info
+        const siteMap: Record<string, { id: string; code: string; name: string }> = {}
+        supervisorSites.forEach(ss => {
+          siteMap[ss.site_id] = {
+            id: ss.sites.id,
+            code: ss.sites.site_code,
+            name: ss.sites.name,
+          }
+        })
+
+        // STEP 2 — Fetch today's coverage
         const siteIds = supervisorSites.map(ss => ss.site_id)
         const today = new Date().toISOString().split('T')[0]
 
-        // FETCH 2 — Get today's roster coverage with site details
         const { data: coverage } = await supabase
           .from('roster_coverage')
-          .select('site_id, shift_definition_id, assigned, required_headcount, is_fulfilled, shift_date, sites(site_code, name)')
+          .select('site_id, assigned, required_headcount, is_fulfilled')
           .in('site_id', siteIds)
           .eq('shift_date', today)
 
-        // FETCH 3 — Get shift definitions
-        const { data: shiftDefs } = await supabase
-          .from('shift_definitions')
-          .select('id, site_id, shift_name, is_active')
-          .in('site_id', siteIds)
-          .eq('is_active', true)
-
-        // FETCH 4 — Get absent guards today
+        // FETCH 3 — Get absent guards today
         const { data: absents } = await supabase
           .from('attendance')
           .select(`
@@ -100,80 +101,37 @@ export default function SupervisorOverviewPage() {
             status,
             shift_assignments(
               id,
-              roster_slot_id,
               site_id,
               users(full_name),
-              roster_slots(shift_definition_id)
+              roster_slots(shift_definition_id, sites(site_code))
             )
           `)
           .eq('status', 'absent')
           .in('shift_assignments.site_id', siteIds)
 
-        // BUILD SITES TABLE
-        const sitesMap = new Map<string, SiteData>()
-        
-        // Initialize sites from supervisor_sites
-        supervisorSites.forEach(ss => {
-          const siteCode = ss.sites?.site_code || 'Unknown'
-          sitesMap.set(siteCode, {
-            code: siteCode,
-            name: siteCode, // Will be updated from coverage data if available
-            id: ss.site_id,
-            shifts: [],
-            fillRate: 0,
-            openSlots: 0,
-          })
-        })
-
-        // Update site names and build shifts from coverage data
-        coverage?.forEach(cov => {
-          const site = Array.from(sitesMap.values()).find(s => s.id === cov.site_id)
-          if (site && cov.sites?.name) {
-            site.name = cov.sites.name // Use actual site name from join
-          }
-        })
-
-        // Build shifts array for each site with today's coverage status
-        sitesMap.forEach(site => {
-          const siteDefs = shiftDefs?.filter(sd => sd.site_id === site.id) || []
-          siteDefs.forEach(shiftDef => {
-            const covRow = coverage?.find(c => c.site_id === site.id && c.shift_definition_id === shiftDef.id)
-            if (covRow) {
-              // Coverage exists - check if fulfilled
-              const status = covRow.is_fulfilled ? 'filled' : covRow.assigned > 0 ? 'partial' : 'gap'
-              site.shifts.push({
-                name: shiftDef.shift_name,
-                status,
-              })
-            } else {
-              // No coverage row - show as gap
-              site.shifts.push({
-                name: shiftDef.shift_name,
-                status: 'gap',
-              })
-            }
-          })
-        })
-
-        // Calculate open slots and fill rates per site
-        sitesMap.forEach(site => {
+        // STEP 3 — Build site rows using siteMap for names
+        const siteRows: SiteData[] = Object.values(siteMap).map(site => {
           const siteCoverage = coverage?.filter(c => c.site_id === site.id) || []
-          const totalRequired = siteCoverage.reduce((sum, c) => sum + (c.required_headcount || 0), 0)
-          const totalAssigned = siteCoverage.reduce((sum, c) => sum + (c.assigned || 0), 0)
-          
-          site.openSlots = totalRequired - totalAssigned
-          if (totalRequired > 0) {
-            site.fillRate = Math.round((totalAssigned / totalRequired) * 100)
+          const totalRequired = siteCoverage.reduce((sum, c) => sum + c.required_headcount, 0)
+          const totalAssigned = siteCoverage.reduce((sum, c) => sum + c.assigned, 0)
+          const openSlots = totalRequired - totalAssigned
+          const fillRate = totalRequired > 0 ? Math.round((totalAssigned / totalRequired) * 100) : 0
+
+          return {
+            code: site.code,
+            name: site.name,
+            fillRate,
+            openSlots,
           }
         })
 
-        setSitesData(Array.from(sitesMap.values()))
+        setSitesData(siteRows)
 
-        // BUILD STATS
-        const sitesWithGaps = Array.from(sitesMap.values()).filter(s => s.openSlots > 0).length
-        const totalUnfilled = Array.from(sitesMap.values()).reduce((sum, s) => sum + s.openSlots, 0)
-        const totalRequired = coverage?.reduce((sum, c) => sum + (c.required_headcount || 0), 0) || 1
-        const totalAssigned = coverage?.reduce((sum, c) => sum + (c.assigned || 0), 0) || 0
+        // STEP 4 — Calculate stat cards
+        const sitesWithGaps = siteRows.filter(s => s.openSlots > 0).length
+        const totalUnfilled = siteRows.reduce((sum, s) => sum + s.openSlots, 0)
+        const totalRequired = coverage?.reduce((sum, c) => sum + c.required_headcount, 0) || 0
+        const totalAssigned = coverage?.reduce((sum, c) => sum + c.assigned, 0) || 0
         const overallFillRate = totalRequired > 0 ? Math.round((totalAssigned / totalRequired) * 100) : 0
 
         setStats([
@@ -183,18 +141,20 @@ export default function SupervisorOverviewPage() {
           { ...stats[3], value: `${overallFillRate}%` },
         ])
 
-        // BUILD ABSENT GUARDS TABLE
+        // BUILD ABSENCE GUARDS TABLE
         const absenceList: AbsentGuard[] = (absents || []).map(a => {
           const assignment = a.shift_assignments
           const guardName = assignment?.users?.full_name || 'Unknown'
-          const shiftDef = shiftDefs?.find(sd => sd.id === assignment?.roster_slots?.shift_definition_id)
-          const shiftName = shiftDef?.shift_name || 'Unknown Shift'
-          const siteCode = supervisorSites.find(ss => ss.site_id === assignment?.site_id)?.sites?.site_code || 'Unknown'
+          const siteCode = assignment?.roster_slots?.sites?.site_code || 'Unknown'
+          // Get shift name from shift_definitions by ID
+          const shiftDef = supervisorSites
+            .find(ss => ss.site_id === assignment?.site_id)
+            ?.sites?.site_code
 
           return {
             name: guardName,
             siteCode,
-            shift: shiftName,
+            shift: 'Shift', // Placeholder - would need shift_definitions join
             status: 'absent',
           }
         })
@@ -224,18 +184,6 @@ export default function SupervisorOverviewPage() {
     if (activeFilter === 'Partial') return sitesData.filter(s => s.fillRate >= 50 && s.fillRate < 80)
     if (activeFilter === 'Filled') return sitesData.filter(s => s.fillRate >= 80)
     return sitesData
-  }
-
-  const getShiftStatusColor = (status: string) => {
-    if (status === 'gap') return 'bg-red-100 text-red-700'
-    if (status === 'partial') return 'bg-amber-100 text-amber-700'
-    return 'bg-green-100 text-green-700'
-  }
-
-  const getShiftStatusSymbol = (status: string) => {
-    if (status === 'gap') return '✕'
-    if (status === 'partial') return '~'
-    return '✓'
   }
 
   const getFillRateBadgeColor = (rate: number) => {
@@ -341,7 +289,6 @@ export default function SupervisorOverviewPage() {
                     <TableRow className="border-slate-200">
                       <TableHead className="text-slate-700 font-semibold">Site Code</TableHead>
                       <TableHead className="text-slate-700 font-semibold">Site Name</TableHead>
-                      <TableHead className="text-slate-700 font-semibold">Shifts today</TableHead>
                       <TableHead className="text-slate-700 font-semibold">Fill rate</TableHead>
                       <TableHead className="text-slate-700 font-semibold">Open slots</TableHead>
                       <TableHead className="text-slate-700 font-semibold">Action</TableHead>
@@ -353,21 +300,12 @@ export default function SupervisorOverviewPage() {
                         <TableCell className="font-medium text-slate-900">{site.code}</TableCell>
                         <TableCell className="text-slate-900">{site.name}</TableCell>
                         <TableCell>
-                          <div className="flex gap-2">
-                            {site.shifts.map((shift, sidx) => (
-                              <span key={sidx} className={`px-2 py-1 rounded text-xs font-medium ${getShiftStatusColor(shift.status)}`}>
-                                {shift.name} {getShiftStatusSymbol(shift.status)}
-                              </span>
-                            ))}
-                          </div>
-                        </TableCell>
-                        <TableCell>
                           <Badge className={getFillRateBadgeColor(site.fillRate)}>
                             {site.fillRate}%
                           </Badge>
                         </TableCell>
                         <TableCell>
-                          {site.fillRate === 100 ? (
+                          {site.openSlots === 0 ? (
                             <span className="text-green-600 font-medium">Filled</span>
                           ) : (
                             <span className="text-red-600 font-medium">{site.openSlots} open</span>
