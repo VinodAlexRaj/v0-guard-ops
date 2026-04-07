@@ -46,14 +46,24 @@ export default function SupervisorOverviewPage() {
   const [activeFilter, setActiveFilter] = useState('All')
   const [loading, setLoading] = useState(true)
   const [currentUser, setCurrentUser] = useState<any>(null)
-  const [stats, setStats] = useState([
-    { label: 'Sites with gaps today', value: 0, color: 'bg-red-50 border-red-200', textColor: 'text-red-600', icon: AlertCircle },
-    { label: 'Unfilled slots today', value: 0, color: 'bg-amber-50 border-amber-200', textColor: 'text-amber-600', icon: AlertCircle },
-    { label: 'Guards absent', value: 0, color: 'bg-red-50 border-red-200', textColor: 'text-red-600', icon: AlertCircle },
-    { label: 'Overall fill rate', value: '0%', color: 'bg-green-50 border-green-200', textColor: 'text-green-600', icon: PieChart },
-  ])
+  const [sitesWithGaps, setSitesWithGaps] = useState(0)
+  const [unfilledSlots, setUnfilledSlots] = useState(0)
+  const [guardsAbsent, setGuardsAbsent] = useState(0)
+  const [fillRate, setFillRate] = useState(0)
+  const [dateStr, setDateStr] = useState('')
   const [sitesData, setSitesData] = useState<SiteData[]>([])
   const [absenceData, setAbsenceData] = useState<AbsentGuard[]>([])
+
+  useEffect(() => {
+    const todayDate = new Date()
+    const formatted = todayDate.toLocaleDateString('en-MY', { 
+      weekday: 'short', 
+      month: 'short', 
+      day: 'numeric', 
+      year: 'numeric' 
+    })
+    setDateStr(formatted)
+  }, [])
 
   useEffect(() => {
     const fetchData = async () => {
@@ -173,18 +183,16 @@ export default function SupervisorOverviewPage() {
         setSitesData(siteRows)
 
         // STEP 5 — Calculate stat cards from siteRows (after all numeric calculations are done)
-        const sitesWithGaps = siteRows.filter(s => s.openSlots > 0).length
-        const totalUnfilled = siteRows.reduce((sum, s) => sum + s.openSlots, 0)
+        const calcSitesWithGaps = siteRows.filter(s => s.openSlots > 0).length
+        const calcTotalUnfilled = siteRows.reduce((sum, s) => sum + s.openSlots, 0)
         const globalTotalRequired = siteRows.reduce((sum, s) => sum + s.totalRequired, 0)
         const globalTotalAssigned = siteRows.reduce((sum, s) => sum + s.totalAssigned, 0)
-        const overallFillRate = globalTotalRequired > 0 ? Math.round((globalTotalAssigned / globalTotalRequired) * 100) : 0
+        const calcOverallFillRate = globalTotalRequired > 0 ? Math.round((globalTotalAssigned / globalTotalRequired) * 100) : 0
 
-        setStats([
-          { ...stats[0], value: sitesWithGaps },
-          { ...stats[1], value: totalUnfilled },
-          { ...stats[2], value: absents?.length || 0 },
-          { ...stats[3], value: `${overallFillRate}%` },
-        ])
+        setSitesWithGaps(calcSitesWithGaps)
+        setUnfilledSlots(calcTotalUnfilled)
+        setGuardsAbsent(absents?.length || 0)
+        setFillRate(calcOverallFillRate)
 
         // BUILD ABSENCE GUARDS TABLE
         const absenceList: AbsentGuard[] = (absents || []).map(a => {
@@ -249,14 +257,6 @@ export default function SupervisorOverviewPage() {
     return '✗'
   }
 
-  const todayDate = new Date()
-  const dateStr = todayDate.toLocaleDateString('en-MY', { 
-    weekday: 'short', 
-    month: 'short', 
-    day: 'numeric', 
-    year: 'numeric' 
-  })
-
   return (
     <>
       {/* Top Navigation */}
@@ -297,25 +297,49 @@ export default function SupervisorOverviewPage() {
           <>
             {/* Stats Cards */}
             <div className="grid grid-cols-4 gap-4 mb-8">
-              {stats.map((stat, idx) => {
-                const Icon = stat.icon
-                return (
-                  <Card
-                    key={idx}
-                    className={`${stat.color} border p-6`}
-                  >
-                    <div className="flex items-start justify-between">
-                      <div>
-                        <p className="text-xs text-slate-600 mb-2">{stat.label}</p>
-                        <p className={`text-3xl font-bold ${stat.textColor}`}>
-                          {stat.value}
-                        </p>
-                      </div>
-                      <Icon className={`w-5 h-5 ${stat.textColor}`} />
-                    </div>
-                  </Card>
-                )
-              })}
+              {/* Sites with gaps today */}
+              <Card className="bg-red-50 border-red-200 border p-6">
+                <div className="flex items-start justify-between">
+                  <div>
+                    <p className="text-xs text-slate-600 mb-2">Sites with gaps today</p>
+                    <p className="text-3xl font-bold text-red-600">{sitesWithGaps}</p>
+                  </div>
+                  <AlertCircle className="w-5 h-5 text-red-600" />
+                </div>
+              </Card>
+
+              {/* Unfilled slots today */}
+              <Card className="bg-amber-50 border-amber-200 border p-6">
+                <div className="flex items-start justify-between">
+                  <div>
+                    <p className="text-xs text-slate-600 mb-2">Unfilled slots today</p>
+                    <p className="text-3xl font-bold text-amber-600">{unfilledSlots}</p>
+                  </div>
+                  <AlertCircle className="w-5 h-5 text-amber-600" />
+                </div>
+              </Card>
+
+              {/* Guards absent */}
+              <Card className="bg-red-50 border-red-200 border p-6">
+                <div className="flex items-start justify-between">
+                  <div>
+                    <p className="text-xs text-slate-600 mb-2">Guards absent</p>
+                    <p className="text-3xl font-bold text-red-600">{guardsAbsent}</p>
+                  </div>
+                  <AlertCircle className="w-5 h-5 text-red-600" />
+                </div>
+              </Card>
+
+              {/* Overall fill rate */}
+              <Card className="bg-green-50 border-green-200 border p-6">
+                <div className="flex items-start justify-between">
+                  <div>
+                    <p className="text-xs text-slate-600 mb-2">Overall fill rate</p>
+                    <p className="text-3xl font-bold text-green-600">{fillRate}%</p>
+                  </div>
+                  <PieChart className="w-5 h-5 text-green-600" />
+                </div>
+              </Card>
             </div>
 
             {/* Sites Needing Attention */}
