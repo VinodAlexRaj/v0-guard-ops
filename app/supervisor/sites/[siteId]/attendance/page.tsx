@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { useRouter, useParams } from 'next/navigation'
-import { createClient } from '@/utils/supabase/client'
+import { supabase } from '@/lib/supabase/client'
 import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -29,7 +29,6 @@ export default function AttendancePage() {
   const router = useRouter()
   const params = useParams()
   const siteId = params.siteId as string
-  const supabase = createClient()
 
   const [activeShift, setActiveShift] = useState<string | null>(null)
   const [shifts, setShifts] = useState<any[]>([])
