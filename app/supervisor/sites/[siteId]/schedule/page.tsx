@@ -227,7 +227,6 @@ export default function SchedulePage() {
     }))
 
     setGuardsDirectory(guardsList)
-    setGuardNames(guardsList)
   }
 
   async function saveAssignment() {
