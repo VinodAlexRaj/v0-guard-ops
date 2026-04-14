@@ -14,7 +14,15 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
-import { LogOut, ArrowRight } from 'lucide-react'
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from '@/components/ui/dialog'
+import { Field, FieldGroup, FieldLabel } from '@/components/ui/field'
+import { LogOut, ArrowRight, Plus } from 'lucide-react'
 import { supabase } from '@/lib/supabase/client'
 import { getLocalDateString } from '@/lib/utils'
 
@@ -42,12 +50,61 @@ export default function ManagerSitesPage() {
   const [sitesWithGaps, setSitesWithGaps] = useState(0)
   const [fullyFilled, setFullyFilled] = useState(0)
 
+  const [showAddSite, setShowAddSite] = useState(false)
+  const [newSiteCode, setNewSiteCode] = useState('')
+  const [newSiteName, setNewSiteName] = useState('')
+  const [newSiteAddress, setNewSiteAddress] = useState('')
+  const [addSiteLoading, setAddSiteLoading] = useState(false)
+  const [addSiteError, setAddSiteError] = useState('')
+
   const handleSignOut = () => {
     router.push('/')
   }
 
   const handleViewSite = (siteCode: string) => {
     router.push(`/manager/sites/${siteCode}`)
+  }
+
+  const handleAddSite = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setAddSiteError('')
+    setAddSiteLoading(true)
+
+    const code = newSiteCode.trim().toUpperCase()
+    const name = newSiteName.trim()
+    const address = newSiteAddress.trim() || null
+
+    if (!code || !name) {
+      setAddSiteError('Site code and name are required.')
+      setAddSiteLoading(false)
+      return
+    }
+
+    const { error } = await supabase
+      .from('sites')
+      .insert({ site_code: code, name, address })
+
+    if (error) {
+      setAddSiteError(
+        error.code === '23505'
+          ? `Site code "${code}" already exists.`
+          : error.message
+      )
+      setAddSiteLoading(false)
+      return
+    }
+
+    // Reset form and close dialog
+    setNewSiteCode('')
+    setNewSiteName('')
+    setNewSiteAddress('')
+    setShowAddSite(false)
+    setAddSiteLoading(false)
+
+    // Re-fetch sites to include the new one
+    setAllSites([])
+    setLoading(true)
+    fetchSites()
   }
 
   // Set date on mount
@@ -63,111 +120,109 @@ export default function ManagerSitesPage() {
   }, [])
 
   // Fetch real data from Supabase
-  useEffect(() => {
-    const fetchSitesData = async () => {
-      try {
-        setLoading(true)
+  const fetchSites = async () => {
+    try {
+      setLoading(true)
 
-        // FETCH 1 — Get all sites
-        const { data: sites } = await supabase
-          .from('sites')
-          .select('id, site_code, name, address')
+      // FETCH 1 — Get all sites
+      const { data: sites } = await supabase
+        .from('sites')
+        .select('id, site_code, name, address')
 
-        if (!sites || sites.length === 0) {
-          setLoading(false)
-          return
-        }
-
-        const siteIds = sites.map(s => s.id)
-
-        // Get current manager name
-        const { data: { user } } = await supabase.auth.getUser()
-        if (user) {
-          const { data: userData } = await supabase
-            .from('users')
-            .select('full_name')
-            .eq('id', user.id)
-            .single()
-          if (userData?.full_name) setManagerName(userData.full_name)
-        }
-
-        // FETCH 2 — Get today's coverage
-        const today = getLocalDateString()
-        const { data: coverage } = await supabase
-          .from('roster_coverage')
-          .select('site_id, assigned, required_headcount')
-          .in('site_id', siteIds)
-          .eq('shift_date', today)
-
-        // FETCH 3 — Get shift definitions count per site
-        const { data: shiftDefs } = await supabase
-          .from('shift_definitions')
-          .select('id, site_id')
-          .in('site_id', siteIds)
-          .eq('is_active', true)
-
-        // FETCH 4 — Get supervisor assignments
-        const { data: supSites } = await supabase
-          .from('supervisor_sites')
-          .select('supervisor_id, site_id, users(full_name)')
-
-        // BUILD TABLE ROWS
-        const covData = coverage || []
-        const shiftData = shiftDefs || []
-        const supData = supSites || []
-
-        const rows: SiteRow[] = sites.map(site => {
-          const siteCov = covData.filter(c => c.site_id === site.id)
-          const totalRequired = siteCov.reduce((sum, c) => sum + c.required_headcount, 0)
-          const totalAssigned = siteCov.reduce((sum, c) => sum + c.assigned, 0)
-          const fillRate = totalRequired > 0 ? Math.round((totalAssigned / totalRequired) * 100) : 100
-          const openSlots = Math.max(0, totalRequired - totalAssigned)
-
-          const activeShifts = shiftData.filter(sd => sd.site_id === site.id).length
-          const supervisorAssignment = supData.find(ss => ss.site_id === site.id)
-          const supervisor = supervisorAssignment?.users?.full_name || 'Unassigned'
-
-          return {
-            code: site.site_code,
-            name: site.name,
-            supervisor,
-            activeShifts: activeShifts || 0,
-            fillRate,
-            openSlots,
-            status: 'Active',
-          }
-        })
-
-        console.log('[v0] BUILT ROWS:', rows)
-        setAllSites(rows)
-
-        // Calculate summary stats
-        const gaps = rows.filter(r => r.openSlots > 0).length
-        const filled = rows.filter(r => r.openSlots === 0).length
-
-        setTotalSites(rows.length)
-        setSitesWithGaps(gaps)
-        setFullyFilled(filled)
-
-        // Extract unique supervisor names for filter
-        const uniqueSupervisors = ['All', ...new Set(rows.map(r => r.supervisor).filter(s => s !== 'Unassigned'))]
-        setSupervisors(uniqueSupervisors)
-      } catch (error) {
-        console.error('[v0] Error fetching sites:', error)
-      } finally {
+      if (!sites || sites.length === 0) {
         setLoading(false)
+        return
       }
-    }
 
-    fetchSitesData()
-  }, [router])
+      const siteIds = sites.map(s => s.id)
+
+      // Get current manager name
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) {
+        router.push('/')
+        return
+      }
+      const { data: userData } = await supabase
+        .from('users')
+        .select('full_name')
+        .eq('id', user.id)
+        .single()
+      if (userData?.full_name) setManagerName(userData.full_name)
+
+      // FETCH 2 — Get today's coverage
+      const today = getLocalDateString()
+      const { data: coverage } = await supabase
+        .from('roster_coverage')
+        .select('site_id, assigned, required_headcount')
+        .in('site_id', siteIds)
+        .eq('shift_date', today)
+
+      // FETCH 3 — Get shift definitions count per site
+      const { data: shiftDefs } = await supabase
+        .from('shift_definitions')
+        .select('id, site_id')
+        .in('site_id', siteIds)
+        .eq('is_active', true)
+
+      // FETCH 4 — Get supervisor assignments
+      const { data: supSites } = await supabase
+        .from('supervisor_sites')
+        .select('supervisor_id, site_id, users(full_name)')
+
+      // BUILD TABLE ROWS
+      const covData = coverage || []
+      const shiftData = shiftDefs || []
+      const supData = supSites || []
+
+      const rows: SiteRow[] = sites.map(site => {
+        const siteCov = covData.filter(c => c.site_id === site.id)
+        const totalRequired = siteCov.reduce((sum, c) => sum + c.required_headcount, 0)
+        const totalAssigned = siteCov.reduce((sum, c) => sum + c.assigned, 0)
+        const fillRate = totalRequired > 0 ? Math.round((totalAssigned / totalRequired) * 100) : 100
+        const openSlots = Math.max(0, totalRequired - totalAssigned)
+
+        const activeShifts = shiftData.filter(sd => sd.site_id === site.id).length
+        const supervisorAssignment = supData.find(ss => ss.site_id === site.id)
+        const supervisor = supervisorAssignment?.users?.full_name || 'Unassigned'
+
+        return {
+          code: site.site_code,
+          name: site.name,
+          supervisor,
+          activeShifts: activeShifts || 0,
+          fillRate,
+          openSlots,
+          status: 'Active',
+        }
+      })
+
+      setAllSites(rows)
+
+      // Calculate summary stats
+      const gaps = rows.filter(r => r.openSlots > 0).length
+      const filled = rows.filter(r => r.openSlots === 0).length
+
+      setTotalSites(rows.length)
+      setSitesWithGaps(gaps)
+      setFullyFilled(filled)
+
+      // Extract unique supervisor names for filter
+      const uniqueSupervisors = ['All', ...new Set(rows.map(r => r.supervisor).filter(s => s !== 'Unassigned'))]
+      setSupervisors(uniqueSupervisors)
+    } catch (error) {
+      console.error('[v0] Error fetching sites:', error)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    fetchSites()
+  }, [])
 
   // Filter and search
   const filteredSites = useMemo(() => {
-    console.log('[v0] allSites:', allSites)
-    console.log('[v0] searchQuery:', searchQuery, 'supervisorFilter:', supervisorFilter, 'statusFilter:', statusFilter)
-    
-    const filtered = allSites.filter((site) => {
+    return allSites.filter((site) => {
       const matchesSearch =
         !searchQuery ||
         site.code.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -178,9 +233,6 @@ export default function ManagerSitesPage() {
 
       return matchesSearch && matchesSupervisor && matchesStatus
     })
-
-    console.log('[v0] filteredSites:', filtered)
-    return filtered
   }, [allSites, searchQuery, supervisorFilter, statusFilter])
 
   const getFillRateColor = (rate: number) => {
@@ -223,13 +275,22 @@ export default function ManagerSitesPage() {
             <h1 className="text-lg font-bold text-slate-900 mb-1">All Sites</h1>
             <p className="text-sm text-slate-600">{totalSites} sites across {supervisors.length - 1} supervisors</p>
           </div>
-          <Input
-            type="text"
-            placeholder="Search site code or name..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-64"
-          />
+          <div className="flex items-center gap-3">
+            <Input
+              type="text"
+              placeholder="Search site code or name..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="w-64"
+            />
+            <Button
+              onClick={() => { setAddSiteError(''); setShowAddSite(true) }}
+              className="bg-slate-900 hover:bg-slate-700 text-white"
+            >
+              <Plus className="w-4 h-4 mr-2" />
+              Add Site
+            </Button>
+          </div>
         </div>
 
         {/* Filter Bars */}
@@ -356,6 +417,68 @@ export default function ManagerSitesPage() {
           <span className="text-sm text-slate-600">Showing {filteredSites.length} of {totalSites} sites</span>
         </div>
       </div>
+
+      {/* Add Site Dialog */}
+      <Dialog open={showAddSite} onOpenChange={setShowAddSite}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Add new site</DialogTitle>
+          </DialogHeader>
+          <form onSubmit={handleAddSite}>
+            <FieldGroup>
+              <Field>
+                <FieldLabel htmlFor="site-code">Site code</FieldLabel>
+                <Input
+                  id="site-code"
+                  placeholder="e.g. KLSNT01"
+                  value={newSiteCode}
+                  onChange={(e) => setNewSiteCode(e.target.value.toUpperCase())}
+                  required
+                />
+              </Field>
+              <Field>
+                <FieldLabel htmlFor="site-name">Site name</FieldLabel>
+                <Input
+                  id="site-name"
+                  placeholder="e.g. Sentral Tower"
+                  value={newSiteName}
+                  onChange={(e) => setNewSiteName(e.target.value)}
+                  required
+                />
+              </Field>
+              <Field>
+                <FieldLabel htmlFor="site-address">Address <span className="text-slate-400 font-normal">(optional)</span></FieldLabel>
+                <Input
+                  id="site-address"
+                  placeholder="e.g. Jalan Stesen Sentral 5, KL"
+                  value={newSiteAddress}
+                  onChange={(e) => setNewSiteAddress(e.target.value)}
+                />
+              </Field>
+              {addSiteError && (
+                <p className="text-sm text-red-600">{addSiteError}</p>
+              )}
+            </FieldGroup>
+            <DialogFooter className="mt-6">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setShowAddSite(false)}
+                disabled={addSiteLoading}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="submit"
+                disabled={addSiteLoading}
+                className="bg-slate-900 hover:bg-slate-700 text-white"
+              >
+                {addSiteLoading ? 'Saving...' : 'Add site'}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
     </>
   )
 }
