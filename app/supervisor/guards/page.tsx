@@ -45,8 +45,11 @@ export default function GuardsPage() {
     router.push('/')
   }
 
-  const handleSchedule = (guardName: string) => {
-    router.push('/supervisor/sites/KLSNT01/schedule')
+  const handleSchedule = (guard: Guard) => {
+    const primarySite = guard.sites[0]
+    if (primarySite) {
+      router.push(`/supervisor/sites/${primarySite}/schedule`)
+    }
   }
 
   const getLeaveColor = (leaveType: string) => {
@@ -120,12 +123,13 @@ export default function GuardsPage() {
           return
         }
 
-        // FETCH 3 — Get guard details
+        // FETCH 3 — Get guard details (active guards only)
         const { data: guardDetails } = await supabase
           .from('users')
           .select('id, full_name, external_employee_code, external_role, is_active')
           .in('id', guardIds)
           .in('external_role', ['SECURITY OFFICER', 'NEPALESE SECURITY OFFICER'])
+          .eq('is_active', true)
 
         // FETCH 4 — Get leaves for this week and today
         const today = getLocalDateString()
@@ -169,7 +173,7 @@ export default function GuardsPage() {
             id: guard.id,
             name: guard.full_name,
             code: guard.external_employee_code,
-            status: guard.is_active && isOnLeaveToday ? 'On leave' : guard.is_active ? 'Active' : 'On leave',
+            status: isOnLeaveToday ? 'On leave' : 'Active',
             leaves: formattedLeaves,
             sites: siteCodes,
             initials,
@@ -185,7 +189,7 @@ export default function GuardsPage() {
     }
 
     fetchGuards()
-  }, [router])
+  }, [])
 
   return (
     <>
@@ -341,7 +345,7 @@ export default function GuardsPage() {
                       <Button
                         variant="outline"
                         size="sm"
-                        onClick={() => handleSchedule(guard.name)}
+                        onClick={() => handleSchedule(guard)}
                         className="text-teal-600 border-teal-200 hover:bg-teal-50"
                       >
                         Schedule

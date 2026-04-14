@@ -24,6 +24,7 @@ interface AttendanceRow {
   otReason: string
   saved: boolean
   shiftEndTime: string
+  shiftDefinitionId: string | null
 }
 
 export default function AttendancePage() {
@@ -67,8 +68,6 @@ export default function AttendancePage() {
           .eq('site_code', siteId.toUpperCase())
           .single()
 
-        console.log('[v0] SITE:', site)
-
         if (siteError || !site) {
           throw new Error('Site not found')
         }
@@ -81,8 +80,6 @@ export default function AttendancePage() {
           .eq('site_id', site.id)
           .eq('is_active', true)
           .order('start_time')
-
-        console.log('[v0] SHIFT DEFS:', shiftDefs)
 
         setShifts(shiftDefs || [])
         if (shiftDefs && shiftDefs.length > 0) {
@@ -97,8 +94,6 @@ export default function AttendancePage() {
           .eq('site_id', site.id)
           .eq('shift_date', today)
 
-        console.log('[v0] SLOTS:', slots)
-
         if (!slots || slots.length === 0) {
           setAttendanceData([])
           return
@@ -106,14 +101,11 @@ export default function AttendancePage() {
 
         // 4. Get assignments for today's slots
         const slotIds = slots.map(s => s.id)
-        const { data: assignments, error: assignError } = await supabase
+        const { data: assignments } = await supabase
           .from('shift_assignments')
           .select('id, roster_slot_id, guard_id')
           .in('roster_slot_id', slotIds)
           .eq('is_cancelled', false)
-
-        console.log('[v0] ASSIGNMENTS:', assignments)
-        console.log('[v0] ASSIGN ERROR:', assignError)
 
         if (!assignments) return
 
@@ -125,16 +117,12 @@ export default function AttendancePage() {
           .select('id, full_name, external_employee_code')
           .in('id', guardIds)
 
-        console.log('[v0] GUARD DETAILS:', guardDetails)
-
         // 6. Get existing attendance records
         const assignmentIds = assignments.map(a => a.id)
         const { data: existingAttendance } = await supabase
           .from('attendance')
           .select('*')
           .in('shift_assignment_id', assignmentIds)
-
-        console.log('[v0] EXISTING ATTENDANCE:', existingAttendance)
 
         // 7. Build rows by combining assignments, guards, and attendance
         const rows: AttendanceRow[] = (assignments || []).map(assignment => {
@@ -170,10 +158,9 @@ export default function AttendancePage() {
             otReason: existing?.overtime_reason || '',
             saved: !!existing,
             shiftEndTime: shiftDefs?.find(sd => sd.id === slot?.shift_definition_id)?.end_time?.slice(0, 5) || '14:00',
+            shiftDefinitionId: slot?.shift_definition_id || null,
           }
         })
-
-        console.log('[v0] BUILT ROWS:', rows)
 
         setAttendanceData(rows)
       } catch (error) {
@@ -323,7 +310,7 @@ export default function AttendancePage() {
   const filteredData = activeShift
     ? attendanceData.filter((row) => {
         const shiftDef = shifts.find(s => s.shift_name === activeShift)
-        return row.shiftEndTime === shiftDef?.end_time?.slice(0, 5)
+        return shiftDef && row.shiftDefinitionId === shiftDef.id
       })
     : attendanceData
 

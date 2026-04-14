@@ -73,20 +73,22 @@ export default function SupervisorOverviewPage() {
 
         // Get current user
         const { data: { user } } = await supabase.auth.getUser()
-        if (user) {
-          const { data: userData } = await supabase
-            .from('users')
-            .select('id, full_name')
-            .eq('id', user.id)
-            .single()
-          setCurrentUser(userData)
+        if (!user) {
+          router.push('/')
+          return
         }
+        const { data: userData } = await supabase
+          .from('users')
+          .select('id, full_name')
+          .eq('id', user.id)
+          .single()
+        setCurrentUser(userData)
 
         // STEP 1 — Fetch supervisor's sites with names
         const { data: supervisorSites } = await supabase
           .from('supervisor_sites')
           .select('site_id, sites(id, site_code, name)')
-          .eq('supervisor_id', user?.id)
+          .eq('supervisor_id', user.id)
 
         if (!supervisorSites || supervisorSites.length === 0) {
           setSitesData([])
@@ -122,7 +124,9 @@ export default function SupervisorOverviewPage() {
           .eq('is_active', true)
 
         // FETCH 3 — Get absent guards today
-        const { data: absents } = await supabase
+        // Note: PostgREST does not filter parent rows via a related-table .in() filter,
+        // so we fetch all absent records and post-filter in JS by the supervisor's siteIds.
+        const { data: absentsRaw } = await supabase
           .from('attendance')
           .select(`
             id,
@@ -135,7 +139,10 @@ export default function SupervisorOverviewPage() {
             )
           `)
           .eq('status', 'absent')
-          .in('shift_assignments.site_id', siteIds)
+
+        const absents = (absentsRaw || []).filter(
+          a => a.shift_assignments && siteIds.includes(a.shift_assignments.site_id)
+        )
 
         // STEP 3 — BUILD SITE ROWS (coverage-based calculations only)
         const siteRows: SiteRow[] = Object.values(siteMap).map(site => {
@@ -191,11 +198,11 @@ export default function SupervisorOverviewPage() {
 
         setSitesWithGaps(calcSitesWithGaps)
         setUnfilledSlots(calcTotalUnfilled)
-        setGuardsAbsent(absents?.length || 0)
+        setGuardsAbsent(absents.length)
         setFillRate(calcOverallFillRate)
 
         // BUILD ABSENCE GUARDS TABLE
-        const absenceList: AbsentGuard[] = (absents || []).map(a => {
+        const absenceList: AbsentGuard[] = absents.map(a => {
           const assignment = a.shift_assignments
           const guardName = assignment?.users?.full_name || 'Unknown'
           const siteCode = assignment?.roster_slots?.sites?.site_code || 'Unknown'

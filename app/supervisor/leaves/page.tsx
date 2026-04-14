@@ -59,7 +59,7 @@ export default function SupervisorLeavesPage() {
       setCurrentUser(userData)
     }
     fetchUser()
-  }, [router])
+  }, [])
 
   // Fetch leaves data
   useEffect(() => {
@@ -173,7 +173,7 @@ export default function SupervisorLeavesPage() {
     }
 
     fetchLeavesData()
-  }, [router])
+  }, [])
 
   // Mock data for summary stats
   const summaryStats = [
@@ -302,7 +302,10 @@ export default function SupervisorLeavesPage() {
         <div className="mb-8 flex items-center justify-between">
           <div>
             <h3 className="text-lg font-bold text-slate-900 mb-1">Leave calendar</h3>
-            <p className="text-sm text-slate-600">Guards on leave — Apr 2026</p>
+            <p className="text-sm text-slate-600">
+              Guards on leave —{' '}
+              {new Date().toLocaleDateString('en-MY', { month: 'short', year: 'numeric' })}
+            </p>
           </div>
           <div className="flex gap-2">
             <button
