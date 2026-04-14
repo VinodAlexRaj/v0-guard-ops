@@ -21,19 +21,34 @@ import {
   DialogTitle,
   DialogFooter,
 } from '@/components/ui/dialog'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
+import { Checkbox } from '@/components/ui/checkbox'
 import { Field, FieldGroup, FieldLabel } from '@/components/ui/field'
-import { LogOut, ArrowRight, Plus } from 'lucide-react'
+import { LogOut, ArrowRight, Plus, UserCheck, Users, X } from 'lucide-react'
 import { supabase } from '@/lib/supabase/client'
 import { getLocalDateString } from '@/lib/utils'
 
 interface SiteRow {
+  siteId: string
   code: string
   name: string
   supervisor: string
+  supervisorId: string | null
   activeShifts: number
   fillRate: number
   openSlots: number
   status: string
+}
+
+interface SupervisorUser {
+  id: string
+  name: string
 }
 
 export default function ManagerSitesPage() {
@@ -56,6 +71,19 @@ export default function ManagerSitesPage() {
   const [newSiteAddress, setNewSiteAddress] = useState('')
   const [addSiteLoading, setAddSiteLoading] = useState(false)
   const [addSiteError, setAddSiteError] = useState('')
+
+  const [supervisorUsers, setSupervisorUsers] = useState<SupervisorUser[]>([])
+  const [showAssignSupervisor, setShowAssignSupervisor] = useState(false)
+  const [assigningSite, setAssigningSite] = useState<SiteRow | null>(null)
+  const [selectedSupervisorId, setSelectedSupervisorId] = useState('')
+  const [assignLoading, setAssignLoading] = useState(false)
+  const [assignError, setAssignError] = useState('')
+
+  // Bulk selection
+  const [selectedSiteIds, setSelectedSiteIds] = useState<Set<string>>(new Set())
+  const [bulkSupervisorId, setBulkSupervisorId] = useState('')
+  const [bulkLoading, setBulkLoading] = useState(false)
+  const [bulkError, setBulkError] = useState('')
 
   const handleSignOut = () => {
     router.push('/')
@@ -104,6 +132,104 @@ export default function ManagerSitesPage() {
     // Re-fetch sites to include the new one
     setAllSites([])
     setLoading(true)
+    fetchSites()
+  }
+
+  const handleOpenAssign = (site: SiteRow) => {
+    setAssigningSite(site)
+    setSelectedSupervisorId(site.supervisorId || '')
+    setAssignError('')
+    setShowAssignSupervisor(true)
+  }
+
+  const handleSaveAssignment = async () => {
+    if (!assigningSite) return
+    setAssignLoading(true)
+    setAssignError('')
+
+    // Remove all existing supervisor assignments for this site
+    const { error: deleteError } = await supabase
+      .from('supervisor_sites')
+      .delete()
+      .eq('site_id', assigningSite.siteId)
+
+    if (deleteError) {
+      setAssignError(deleteError.message)
+      setAssignLoading(false)
+      return
+    }
+
+    // Insert new assignment if a supervisor was selected (empty = unassign)
+    if (selectedSupervisorId) {
+      const { error: insertError } = await supabase
+        .from('supervisor_sites')
+        .insert({ supervisor_id: selectedSupervisorId, site_id: assigningSite.siteId })
+
+      if (insertError) {
+        setAssignError(insertError.message)
+        setAssignLoading(false)
+        return
+      }
+    }
+
+    setShowAssignSupervisor(false)
+    setAssignLoading(false)
+    fetchSites()
+  }
+
+  const toggleSite = (siteId: string) => {
+    setSelectedSiteIds(prev => {
+      const next = new Set(prev)
+      next.has(siteId) ? next.delete(siteId) : next.add(siteId)
+      return next
+    })
+  }
+
+  const toggleAll = (filteredRows: SiteRow[]) => {
+    const allSelected = filteredRows.every(s => selectedSiteIds.has(s.siteId))
+    if (allSelected) {
+      setSelectedSiteIds(new Set())
+    } else {
+      setSelectedSiteIds(new Set(filteredRows.map(s => s.siteId)))
+    }
+  }
+
+  const handleBulkAssign = async () => {
+    if (!bulkSupervisorId || selectedSiteIds.size === 0) return
+    setBulkLoading(true)
+    setBulkError('')
+
+    const siteIdArray = Array.from(selectedSiteIds)
+
+    // Delete all existing supervisor assignments for selected sites
+    const { error: deleteError } = await supabase
+      .from('supervisor_sites')
+      .delete()
+      .in('site_id', siteIdArray)
+
+    if (deleteError) {
+      setBulkError(deleteError.message)
+      setBulkLoading(false)
+      return
+    }
+
+    // Insert new assignment for each selected site
+    const { error: insertError } = await supabase
+      .from('supervisor_sites')
+      .insert(siteIdArray.map(siteId => ({
+        supervisor_id: bulkSupervisorId,
+        site_id: siteId,
+      })))
+
+    if (insertError) {
+      setBulkError(insertError.message)
+      setBulkLoading(false)
+      return
+    }
+
+    setSelectedSiteIds(new Set())
+    setBulkSupervisorId('')
+    setBulkLoading(false)
     fetchSites()
   }
 
@@ -169,6 +295,23 @@ export default function ManagerSitesPage() {
         .from('supervisor_sites')
         .select('supervisor_id, site_id, users(full_name)')
 
+      // FETCH 5 — Get all supervisors for assign dialog (via users_with_role)
+      const { data: supervisorRoles } = await supabase
+        .from('users_with_role')
+        .select('id')
+        .eq('role', 'supervisor')
+
+      const supervisorIds = (supervisorRoles || []).map(r => r.id)
+      if (supervisorIds.length > 0) {
+        const { data: supUsers } = await supabase
+          .from('users')
+          .select('id, full_name')
+          .in('id', supervisorIds)
+          .eq('is_active', true)
+          .order('full_name')
+        setSupervisorUsers((supUsers || []).map(u => ({ id: u.id, name: u.full_name })))
+      }
+
       // BUILD TABLE ROWS
       const covData = coverage || []
       const shiftData = shiftDefs || []
@@ -184,11 +327,14 @@ export default function ManagerSitesPage() {
         const activeShifts = shiftData.filter(sd => sd.site_id === site.id).length
         const supervisorAssignment = supData.find(ss => ss.site_id === site.id)
         const supervisor = supervisorAssignment?.users?.full_name || 'Unassigned'
+        const supervisorId = supervisorAssignment?.supervisor_id || null
 
         return {
+          siteId: site.id,
           code: site.site_code,
           name: site.name,
           supervisor,
+          supervisorId,
           activeShifts: activeShifts || 0,
           fillRate,
           openSlots,
@@ -235,6 +381,12 @@ export default function ManagerSitesPage() {
     })
   }, [allSites, searchQuery, supervisorFilter, statusFilter])
 
+  const allFilteredSelected =
+    filteredSites.length > 0 && filteredSites.every(s => selectedSiteIds.has(s.siteId))
+  const someFilteredSelected =
+    filteredSites.some(s => selectedSiteIds.has(s.siteId)) && !allFilteredSelected
+  const anySelected = selectedSiteIds.size > 0
+
   const getFillRateColor = (rate: number) => {
     if (rate >= 80) return 'bg-green-100 text-green-700 border-0'
     if (rate >= 50) return 'bg-amber-100 text-amber-700 border-0'
@@ -268,7 +420,7 @@ export default function ManagerSitesPage() {
       </header>
 
       {/* Page Content */}
-      <div className="p-8">
+      <div className={`p-8 ${anySelected ? 'pb-28' : ''}`}>
         {/* Header with Search */}
         <div className="mb-8 flex items-center justify-between">
           <div>
@@ -362,6 +514,13 @@ export default function ManagerSitesPage() {
             <table className="w-full">
               <thead className="bg-slate-50">
                 <tr className="border-slate-200">
+                  <th className="px-4 py-3 w-10">
+                    <Checkbox
+                      checked={someFilteredSelected ? 'indeterminate' : allFilteredSelected}
+                      onCheckedChange={() => toggleAll(filteredSites)}
+                      aria-label="Select all"
+                    />
+                  </th>
                   <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700">Site Code</th>
                   <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700">Site Name</th>
                   <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700">Supervisor</th>
@@ -373,7 +532,19 @@ export default function ManagerSitesPage() {
               </thead>
               <tbody>
                 {filteredSites.map((site, idx) => (
-                  <tr key={idx} className="border-b border-slate-200 hover:bg-slate-50">
+                  <tr
+                    key={idx}
+                    className={`border-b border-slate-200 hover:bg-slate-50 ${
+                      selectedSiteIds.has(site.siteId) ? 'bg-slate-100' : ''
+                    }`}
+                  >
+                    <td className="px-4 py-3">
+                      <Checkbox
+                        checked={selectedSiteIds.has(site.siteId)}
+                        onCheckedChange={() => toggleSite(site.siteId)}
+                        aria-label={`Select ${site.name}`}
+                      />
+                    </td>
                     <td className="px-4 py-3">
                       <span className="font-mono text-sm font-medium text-slate-900">{site.code}</span>
                     </td>
@@ -395,15 +566,26 @@ export default function ManagerSitesPage() {
                       <span className="text-sm text-slate-700">{site.openSlots}</span>
                     </td>
                     <td className="px-4 py-3">
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => handleViewSite(site.code)}
-                        className="text-slate-600 hover:text-slate-900"
-                      >
-                        View
-                        <ArrowRight className="w-4 h-4 ml-2" />
-                      </Button>
+                      <div className="flex items-center gap-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => handleOpenAssign(site)}
+                          className="text-slate-700 border-slate-300 hover:bg-slate-50"
+                        >
+                          <UserCheck className="w-3.5 h-3.5 mr-1.5" />
+                          {site.supervisor === 'Unassigned' ? 'Assign' : 'Reassign'}
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => handleViewSite(site.code)}
+                          className="text-slate-600 hover:text-slate-900"
+                        >
+                          View
+                          <ArrowRight className="w-4 h-4 ml-2" />
+                        </Button>
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -417,6 +599,52 @@ export default function ManagerSitesPage() {
           <span className="text-sm text-slate-600">Showing {filteredSites.length} of {totalSites} sites</span>
         </div>
       </div>
+
+      {/* Bulk Action Bar */}
+      {anySelected && (
+        <div className="fixed bottom-0 inset-x-0 z-50 flex items-center justify-between gap-4 border-t border-slate-200 bg-white px-8 py-4 shadow-lg">
+          <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2 text-sm font-medium text-slate-900">
+              <Users className="w-4 h-4 text-slate-500" />
+              {selectedSiteIds.size} site{selectedSiteIds.size !== 1 ? 's' : ''} selected
+            </div>
+            <button
+              onClick={() => { setSelectedSiteIds(new Set()); setBulkSupervisorId(''); setBulkError('') }}
+              className="flex items-center gap-1 text-xs text-slate-500 hover:text-slate-700 transition"
+            >
+              <X className="w-3.5 h-3.5" />
+              Clear
+            </button>
+          </div>
+
+          <div className="flex items-center gap-3">
+            {bulkError && (
+              <p className="text-sm text-red-600">{bulkError}</p>
+            )}
+            <Select value={bulkSupervisorId} onValueChange={setBulkSupervisorId}>
+              <SelectTrigger className="w-56">
+                <SelectValue placeholder="Select supervisor..." />
+              </SelectTrigger>
+              <SelectContent>
+                {supervisorUsers.map(sup => (
+                  <SelectItem key={sup.id} value={sup.id}>
+                    {sup.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Button
+              onClick={handleBulkAssign}
+              disabled={!bulkSupervisorId || bulkLoading}
+              className="bg-slate-900 hover:bg-slate-700 text-white disabled:opacity-50"
+            >
+              {bulkLoading
+                ? 'Assigning...'
+                : `Assign to ${selectedSiteIds.size} site${selectedSiteIds.size !== 1 ? 's' : ''}`}
+            </Button>
+          </div>
+        </div>
+      )}
 
       {/* Add Site Dialog */}
       <Dialog open={showAddSite} onOpenChange={setShowAddSite}>
@@ -477,6 +705,77 @@ export default function ManagerSitesPage() {
               </Button>
             </DialogFooter>
           </form>
+        </DialogContent>
+      </Dialog>
+      {/* Assign Supervisor Dialog */}
+      <Dialog open={showAssignSupervisor} onOpenChange={setShowAssignSupervisor}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Assign supervisor</DialogTitle>
+          </DialogHeader>
+
+          {assigningSite && (
+            <div className="space-y-4">
+              {/* Site info */}
+              <div className="rounded-md bg-slate-50 border border-slate-200 px-4 py-3">
+                <p className="text-xs text-slate-500 mb-0.5">Site</p>
+                <p className="text-sm font-semibold text-slate-900">{assigningSite.name}</p>
+                <p className="text-xs text-slate-500 font-mono mt-0.5">{assigningSite.code}</p>
+              </div>
+
+              {/* Current supervisor */}
+              <div>
+                <p className="text-xs text-slate-500 mb-1">Current supervisor</p>
+                <p className="text-sm text-slate-700">
+                  {assigningSite.supervisor === 'Unassigned'
+                    ? <span className="text-slate-400 italic">Unassigned</span>
+                    : assigningSite.supervisor}
+                </p>
+              </div>
+
+              {/* Supervisor select */}
+              <Field>
+                <FieldLabel htmlFor="assign-supervisor">New supervisor</FieldLabel>
+                <Select
+                  value={selectedSupervisorId}
+                  onValueChange={setSelectedSupervisorId}
+                >
+                  <SelectTrigger id="assign-supervisor" className="w-full">
+                    <SelectValue placeholder="Select a supervisor..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="">— Unassign —</SelectItem>
+                    {supervisorUsers.map(sup => (
+                      <SelectItem key={sup.id} value={sup.id}>
+                        {sup.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </Field>
+
+              {assignError && (
+                <p className="text-sm text-red-600">{assignError}</p>
+              )}
+            </div>
+          )}
+
+          <DialogFooter className="mt-2">
+            <Button
+              variant="outline"
+              onClick={() => setShowAssignSupervisor(false)}
+              disabled={assignLoading}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleSaveAssignment}
+              disabled={assignLoading}
+              className="bg-slate-900 hover:bg-slate-700 text-white"
+            >
+              {assignLoading ? 'Saving...' : 'Save'}
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </>
