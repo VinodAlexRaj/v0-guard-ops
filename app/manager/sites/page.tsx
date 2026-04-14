@@ -137,7 +137,7 @@ export default function ManagerSitesPage() {
 
   const handleOpenAssign = (site: SiteRow) => {
     setAssigningSite(site)
-    setSelectedSupervisorId(site.supervisorId || '')
+    setSelectedSupervisorId(site.supervisorId || '__none__')
     setAssignError('')
     setShowAssignSupervisor(true)
   }
@@ -159,8 +159,8 @@ export default function ManagerSitesPage() {
       return
     }
 
-    // Insert new assignment if a supervisor was selected (empty = unassign)
-    if (selectedSupervisorId) {
+    // Insert new assignment if a real supervisor was selected (__none__ = unassign only)
+    if (selectedSupervisorId && selectedSupervisorId !== '__none__') {
       const { error: insertError } = await supabase
         .from('supervisor_sites')
         .insert({ supervisor_id: selectedSupervisorId, site_id: assigningSite.siteId })
@@ -744,7 +744,7 @@ export default function ManagerSitesPage() {
                     <SelectValue placeholder="Select a supervisor..." />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="">— Unassign —</SelectItem>
+                    <SelectItem value="__none__">— Unassign —</SelectItem>
                     {supervisorUsers.map(sup => (
                       <SelectItem key={sup.id} value={sup.id}>
                         {sup.name}
