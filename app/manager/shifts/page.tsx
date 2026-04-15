@@ -235,6 +235,10 @@ export default function ShiftsPage() {
     })
   }
 
+  const isOvernightShift = (startTime: string, endTime: string) => {
+    return endTime < startTime
+  }
+
   const handleFormChange = <K extends keyof ShiftFormValues>(
     field: K,
     value: ShiftFormValues[K]
@@ -547,7 +551,14 @@ export default function ShiftsPage() {
                             </td>
 
                             <td className="px-4 py-3 text-sm font-medium text-slate-900">
-                              {formatTime(shift.start_time)}–{formatTime(shift.end_time)}
+                              <div>
+                                <span>
+                                  {formatTime(shift.start_time)}–{formatTime(shift.end_time)}
+                                </span>
+                                {isOvernightShift(shift.start_time, shift.end_time) && (
+                                  <span className="ml-2 text-xs text-amber-600">(next day)</span>
+                                )}
+                              </div>
                             </td>
 
                             <td className="px-4 py-3 text-sm font-medium text-slate-900">
