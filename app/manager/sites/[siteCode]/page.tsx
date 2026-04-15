@@ -179,18 +179,26 @@ export default function SiteDetailPage() {
       .select('id, full_name')
       .eq('external_role', 'OPERATIONS EXECUTIVE')
       .eq('is_active', true)
-    if (data) {
-      setSupervisorList(data.map(u => ({ id: u.id, name: u.full_name })))
-    }
+    return data ? data.map(u => ({ id: u.id, name: u.full_name })) : []
   }
 
   const handleOpenEditModal = async () => {
-    if (!site) return
-    await fetchSupervisors()
+    console.log('[v0] handleOpenEditModal called')
+    if (!site) {
+      console.log('[v0] site is null, returning')
+      return
+    }
+    console.log('[v0] site exists:', site)
+    console.log('[v0] fetching supervisors...')
+    const supervisors = await fetchSupervisors()
+    console.log('[v0] supervisors fetched:', supervisors)
+    console.log('[v0] setting all state at once...')
+    setSupervisorList(supervisors)
     setEditName(site.name)
     setEditAddress(site.address || '')
     setEditSupervisor(supervisor?.id || '')
     setIsEditModalOpen(true)
+    console.log('[v0] isEditModalOpen state set to true')
   }
 
   const handleSaveEdit = async () => {
