@@ -204,14 +204,14 @@ export default function ManagerGuardsPage() {
 
         const override = guardSupRows.find((g: any) => g.guard_id === staff.id)
 
-        const overrideUsers = override?.supervisor as { full_name: string }[] | undefined
-        let supervisor: string | null = overrideUsers?.[0]?.full_name || null
+        // Supabase FK joins return object (not array) for single relations
+        const overrideSup = override?.supervisor as { full_name: string } | null
+        let supervisor: string | null = overrideSup?.full_name || null
         const supervisorId: string | null = override?.supervisor_id || null
 
         if (!supervisor && latestSiteId) {
           const supAssignment = supSiteData.find((ss: any) => ss.site_id === latestSiteId)
-          const supUsers = supAssignment?.users as { full_name: string }[] | undefined
-          const supUser = supUsers?.[0]
+          const supUser = supAssignment?.users as { full_name: string } | null
           supervisor = supUser?.full_name || null
         }
 
