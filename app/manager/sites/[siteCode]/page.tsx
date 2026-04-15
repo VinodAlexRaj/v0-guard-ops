@@ -120,10 +120,12 @@ export default function SiteDetailPage() {
           .eq('site_id', siteData.id)
           .single()
 
-        if (supAssignment?.users) {
+        if (supAssignment?.users && supAssignment.users.length > 0) {
+          const user = supAssignment.users[0]
+
           setSupervisor({
             id: supAssignment.supervisor_id,
-            name: supAssignment.users.full_name,
+            name: user.full_name,
           })
         }
 
@@ -153,8 +155,15 @@ export default function SiteDetailPage() {
           .eq('shift_date', today)
           .eq('is_cancelled', false)
 
-        const guardNames = [...new Set((assignments || []).map(a => a.users?.full_name).filter(Boolean))]
-        setAssignedGuards(guardNames as string[])
+        const guardNames = [
+          ...new Set(
+            (assignments || [])
+              .map(a => a.users?.[0]?.full_name)
+              .filter(Boolean)
+          ),
+        ] as string[]
+
+        setAssignedGuards(guardNames)
       } catch (error) {
         console.error('[v0] Error fetching site data:', error)
       } finally {
@@ -236,12 +245,15 @@ export default function SiteDetailPage() {
 
       setIsEditModalOpen(false)
 
-      // Update local state instead of reloading
-      setSite(prev => prev ? {
-        ...prev,
-        name: editName.trim(),
-        address: editAddress.trim() || null,
-      } : prev)
+      setSite(prev =>
+        prev
+          ? {
+            ...prev,
+            name: editName.trim(),
+            address: editAddress.trim() || null,
+          }
+          : prev
+      )
 
       if (editSupervisor === 'unassigned') {
         setSupervisor(null)
