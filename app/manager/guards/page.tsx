@@ -33,6 +33,7 @@ interface SiteRow {
 interface SupervisorRow {
   id: string
   full_name: string
+  external_role?: string
 }
 
 export default function ManagerGuardsPage() {
@@ -101,6 +102,25 @@ export default function ManagerGuardsPage() {
         if (userData?.full_name) setManagerName(userData.full_name)
       }
 
+      // Get role mappings first because users -> role_mapping is not a FK relation
+      const { data: guardRoleMap, error: guardRoleError } = await supabase
+        .from('role_mapping')
+        .select('external_role')
+        .eq('internal_role', 'guard')
+
+      if (guardRoleError) throw guardRoleError
+
+      const { data: supervisorRoleMap, error: supervisorRoleError } = await supabase
+        .from('role_mapping')
+        .select('external_role')
+        .eq('internal_role', 'supervisor')
+
+      if (supervisorRoleError) throw supervisorRoleError
+
+      const guardRoles = (guardRoleMap || []).map((r: any) => r.external_role)
+      const supervisorRoles = (supervisorRoleMap || []).map((r: any) => r.external_role)
+
+      // Guards
       const { data: staffData, error: staffError } = await supabase
         .from('users')
         .select(`
@@ -110,22 +130,18 @@ export default function ManagerGuardsPage() {
           external_role,
           phone,
           is_active,
-          created_at,
-          role_mapping!inner(internal_role)
+          created_at
         `)
-        .eq('role_mapping.internal_role', 'guard')
+        .in('external_role', guardRoles)
         .order('full_name')
 
       if (staffError) throw staffError
 
+      // Supervisors
       const { data: supUsers, error: supUsersError } = await supabase
         .from('users')
-        .select(`
-          id,
-          full_name,
-          role_mapping!inner(internal_role)
-        `)
-        .eq('role_mapping.internal_role', 'supervisor')
+        .select('id, full_name, external_role')
+        .in('external_role', supervisorRoles)
         .order('full_name')
 
       if (supUsersError) throw supUsersError
@@ -198,7 +214,6 @@ export default function ManagerGuardsPage() {
           const supAssignment = supSiteData.find((ss: any) => ss.site_id === latestSiteId)
           const supUsers = supAssignment?.users as { full_name: string }[] | undefined
           const supUser = supUsers?.[0]
-
           supervisor = supUser?.full_name || null
         }
 
