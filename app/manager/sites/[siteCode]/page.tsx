@@ -235,7 +235,22 @@ export default function SiteDetailPage() {
       }
 
       setIsEditModalOpen(false)
-      window.location.reload()
+
+      // Update local state instead of reloading
+      setSite(prev => prev ? {
+        ...prev,
+        name: editName.trim(),
+        address: editAddress.trim() || null,
+      } : prev)
+
+      if (editSupervisor === 'unassigned') {
+        setSupervisor(null)
+      } else {
+        const selected = supervisorList.find(s => s.id === editSupervisor)
+        if (selected) {
+          setSupervisor(selected)
+        }
+      }
     } catch (error) {
       console.error('[v0] Error saving site:', error)
       alert('Error saving site')
