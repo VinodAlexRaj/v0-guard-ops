@@ -183,22 +183,23 @@ export default function SiteDetailPage() {
   }
 
   const handleOpenEditModal = async () => {
-    console.log('[v0] handleOpenEditModal called')
+    console.log('[v0] handleOpenEditModal called at', new Date().toISOString())
     if (!site) {
       console.log('[v0] site is null, returning')
       return
     }
-    console.log('[v0] site exists:', site)
+    console.log('[v0] site exists:', site.site_code)
     console.log('[v0] fetching supervisors...')
     const supervisors = await fetchSupervisors()
-    console.log('[v0] supervisors fetched:', supervisors)
+    console.log('[v0] supervisors fetched:', supervisors.length, 'supervisors')
     console.log('[v0] setting all state at once...')
     setSupervisorList(supervisors)
     setEditName(site.name)
     setEditAddress(site.address || '')
     setEditSupervisor(supervisor?.id || '')
+    console.log('[v0] calling setIsEditModalOpen(true)')
     setIsEditModalOpen(true)
-    console.log('[v0] isEditModalOpen state set to true')
+    console.log('[v0] setIsEditModalOpen(true) called, state should update in next render')
   }
 
   const handleSaveEdit = async () => {
@@ -319,6 +320,15 @@ export default function SiteDetailPage() {
 
   return (
     <>
+      {/* DEBUG: Visible state display */}
+      <div className="fixed top-16 right-4 z-50 bg-yellow-100 border-2 border-yellow-600 p-4 rounded max-w-xs text-xs font-mono">
+        <div className="font-bold mb-2">DEBUG: Edit Modal State</div>
+        <div>isEditModalOpen: <span className="font-bold text-red-600">{isEditModalOpen.toString()}</span></div>
+        <div>supervisorList.length: <span className="font-bold">{supervisorList.length}</span></div>
+        <div>site exists: <span className="font-bold">{(site ? 'YES' : 'NO')}</span></div>
+        <div>editName: <span className="font-bold">{editName}</span></div>
+      </div>
+
       {/* Top Navigation */}
       <header className="border-b border-slate-200 bg-white px-8 py-4">
         <div className="flex items-center justify-between">
@@ -478,8 +488,14 @@ export default function SiteDetailPage() {
       </div>
 
       {/* Edit Site Modal */}
-      <Dialog open={isEditModalOpen} onOpenChange={setIsEditModalOpen}>
+      {console.log('[v0] Rendering Edit Modal with open=', isEditModalOpen)}
+      <Dialog open={isEditModalOpen} onOpenChange={(newOpen) => {
+        console.log('[v0] Dialog onOpenChange called with newOpen=', newOpen)
+        setIsEditModalOpen(newOpen)
+      }}>
+        {isEditModalOpen && console.log('[v0] Dialog has open=true, rendering DialogContent')}
         <DialogContent className="sm:max-w-md">
+          {console.log('[v0] DialogContent mounted and rendering')}
           <DialogHeader>
             <DialogTitle>Edit Site</DialogTitle>
           </DialogHeader>
