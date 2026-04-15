@@ -46,7 +46,10 @@ export default function ManagerGuardsPage() {
 
   const [editingGuard, setEditingGuard] = useState<GuardRow | null>(null)
   const [isModalOpen, setIsModalOpen] = useState(false)
-  const [formValues, setFormValues] = useState<any>({})
+  const [formValues, setFormValues] = useState<{ supervisor: string; isActive: boolean }>({
+    supervisor: '',
+    isActive: true,
+  })
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
 
@@ -64,9 +67,7 @@ export default function ManagerGuardsPage() {
   const [inactiveGuards, setInactiveGuards] = useState(0)
 
   const [selectedGuardIds, setSelectedGuardIds] = useState<string[]>([])
-  const [bulkSiteId, setBulkSiteId] = useState('')
-  const [bulkStartTime, setBulkStartTime] = useState('08:00')
-  const [bulkEndTime, setBulkEndTime] = useState('16:00')
+  const [bulkSupervisorId, setBulkSupervisorId] = useState('')
   const [bulkAssigning, setBulkAssigning] = useState(false)
 
   const handleSignOut = () => {
@@ -102,7 +103,6 @@ export default function ManagerGuardsPage() {
         if (userData?.full_name) setManagerName(userData.full_name)
       }
 
-      // Get role mappings first because users -> role_mapping is not a FK relation
       const { data: guardRoleMap, error: guardRoleError } = await supabase
         .from('role_mapping')
         .select('external_role')
@@ -120,7 +120,6 @@ export default function ManagerGuardsPage() {
       const guardRoles = (guardRoleMap || []).map((r: any) => r.external_role)
       const supervisorRoles = (supervisorRoleMap || []).map((r: any) => r.external_role)
 
-      // Guards
       const { data: staffData, error: staffError } = await supabase
         .from('users')
         .select(`
@@ -137,7 +136,6 @@ export default function ManagerGuardsPage() {
 
       if (staffError) throw staffError
 
-      // Supervisors
       const { data: supUsers, error: supUsersError } = await supabase
         .from('users')
         .select('id, full_name, external_role')
@@ -337,76 +335,36 @@ export default function ManagerGuardsPage() {
     }
   }
 
-  const handleBulkAssign = async () => {
-    if (!bulkSiteId) {
-      alert('Please select a site')
+  const handleBulkAssignSupervisor = async () => {
+    if (!bulkSupervisorId) {
+      alert('Please select a supervisor')
       return
     }
     if (selectedGuardIds.length === 0) {
       alert('Please select at least one guard')
       return
     }
-    if (!bulkStartTime || !bulkEndTime) {
-      alert('Please select start and end time')
-      return
-    }
 
     try {
       setBulkAssigning(true)
 
-      const today = getLocalDateString()
-
-      const existingAssignments = await supabase
-        .from('shift_assignments')
-        .select('guard_id, site_id, is_cancelled')
-        .in('guard_id', selectedGuardIds)
-        .eq('site_id', bulkSiteId)
-        .eq('is_cancelled', false)
-
-      if (existingAssignments.error) throw existingAssignments.error
-
-      const alreadyAssignedIds = new Set(
-        (existingAssignments.data || []).map((a: any) => a.guard_id)
-      )
-
-      const startAt = `${today}T${bulkStartTime}:00`
-      let endDate = today
-      if (bulkEndTime < bulkStartTime) {
-        const d = new Date(today)
-        d.setDate(d.getDate() + 1)
-        endDate = d.toISOString().slice(0, 10)
-      }
-      const endAt = `${endDate}T${bulkEndTime}:00`
-
-      const rowsToInsert = selectedGuardIds
-        .filter((guardId) => !alreadyAssignedIds.has(guardId))
-        .map((guardId) => ({
-          site_id: bulkSiteId,
-          guard_id: guardId,
-          start_time: startAt,
-          end_time: endAt,
-          assignment_type: 'planned',
-          is_cancelled: false,
-        }))
-
-      if (rowsToInsert.length === 0) {
-        alert('Selected guards are already assigned to this site')
-        setBulkAssigning(false)
-        return
-      }
+      const rowsToUpsert = selectedGuardIds.map((guardId) => ({
+        guard_id: guardId,
+        supervisor_id: bulkSupervisorId,
+      }))
 
       const { error } = await supabase
-        .from('shift_assignments')
-        .insert(rowsToInsert)
+        .from('guard_supervisor')
+        .upsert(rowsToUpsert)
 
       if (error) throw error
 
       setSelectedGuardIds([])
-      setBulkSiteId('')
+      setBulkSupervisorId('')
       await loadGuardData()
     } catch (error: any) {
-      console.error('[guards] Bulk assign error:', error)
-      alert(error?.message || 'Failed to bulk assign guards')
+      console.error('[guards] Bulk supervisor assign error:', error)
+      alert(error?.message || 'Failed to bulk assign supervisor')
     } finally {
       setBulkAssigning(false)
     }
@@ -474,55 +432,31 @@ export default function ManagerGuardsPage() {
           <div className="flex flex-wrap items-end gap-4">
             <div>
               <label className="block text-sm font-medium text-slate-700 mb-2">
-                Assign selected guards to site
+                Assign selected guards to supervisor
               </label>
               <select
-                value={bulkSiteId}
-                onChange={(e) => setBulkSiteId(e.target.value)}
-                className="w-56 px-3 py-2 border border-slate-300 rounded-md text-sm text-slate-900"
+                value={bulkSupervisorId}
+                onChange={(e) => setBulkSupervisorId(e.target.value)}
+                className="w-64 px-3 py-2 border border-slate-300 rounded-md text-sm text-slate-900"
               >
-                <option value="">Select site</option>
-                {sites.map((site) => (
-                  <option key={site.id} value={site.id}>
-                    {site.site_code} - {site.name}
+                <option value="">Select supervisor</option>
+                {supervisorList.map((supervisor) => (
+                  <option key={supervisor.id} value={supervisor.id}>
+                    {supervisor.full_name}
                   </option>
                 ))}
               </select>
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-slate-700 mb-2">
-                Start Time
-              </label>
-              <Input
-                type="time"
-                value={bulkStartTime}
-                onChange={(e) => setBulkStartTime(e.target.value)}
-                className="w-36"
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-slate-700 mb-2">
-                End Time
-              </label>
-              <Input
-                type="time"
-                value={bulkEndTime}
-                onChange={(e) => setBulkEndTime(e.target.value)}
-                className="w-36"
-              />
-            </div>
-
-            <div>
               <Button
-                onClick={handleBulkAssign}
+                onClick={handleBulkAssignSupervisor}
                 disabled={bulkAssigning || selectedGuardIds.length === 0}
                 className="bg-slate-700 hover:bg-slate-800"
               >
                 {bulkAssigning
                   ? 'Assigning...'
-                  : `Bulk Assign (${selectedGuardIds.length})`}
+                  : `Bulk Assign Supervisor (${selectedGuardIds.length})`}
               </Button>
             </div>
           </div>
