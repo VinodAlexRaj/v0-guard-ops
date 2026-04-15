@@ -2,18 +2,17 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { Card } from '@/components/ui/card'
-import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import {
   Dialog,
   DialogContent,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
-  DialogFooter,
 } from '@/components/ui/dialog'
-import { LogOut, Plus, Edit2, AlertCircle } from 'lucide-react'
+import { AlertCircle, Edit2, LogOut, Plus } from 'lucide-react'
 import { supabase } from '@/lib/supabase/client'
 
 type Site = {
@@ -222,6 +221,20 @@ export default function ShiftsPage() {
     return sorted.map((d) => map[d]).join(', ')
   }
 
+  const formatTime = (time: string | null) => {
+    if (!time) return '-'
+    return time.slice(0, 5)
+  }
+
+  const formatDate = (date: string | null) => {
+    if (!date) return '-'
+    return new Date(date).toLocaleDateString('en-GB', {
+      day: '2-digit',
+      month: 'short',
+      year: 'numeric',
+    })
+  }
+
   const handleFormChange = <K extends keyof ShiftFormValues>(
     field: K,
     value: ShiftFormValues[K]
@@ -412,7 +425,9 @@ export default function ShiftsPage() {
 
           <div className="space-y-1 p-2">
             {filteredSites.map((site) => {
-              const count = shifts.filter((s) => s.site_id === site.id).length
+              const siteShifts = shifts.filter((s) => s.site_id === site.id)
+              const totalCount = siteShifts.length
+              const activeCount = siteShifts.filter((s) => s.is_active).length
 
               return (
                 <button
@@ -428,8 +443,13 @@ export default function ShiftsPage() {
                     <div>
                       <div className="font-medium">{site.site_code}</div>
                       <div className="text-xs text-slate-500">{site.name}</div>
+                      <div className="mt-1 text-[11px] text-slate-500">
+                        {activeCount} active / {totalCount} total
+                      </div>
                     </div>
-                    <Badge variant="secondary">{count}</Badge>
+                    <Badge variant="secondary">
+                      {activeCount}/{totalCount}
+                    </Badge>
                   </div>
                 </button>
               )
@@ -499,6 +519,12 @@ export default function ShiftsPage() {
                             Days
                           </th>
                           <th className="px-4 py-3 text-left text-xs font-semibold uppercase text-slate-700">
+                            Start Date
+                          </th>
+                          <th className="px-4 py-3 text-left text-xs font-semibold uppercase text-slate-700">
+                            End Date
+                          </th>
+                          <th className="px-4 py-3 text-left text-xs font-semibold uppercase text-slate-700">
                             Type
                           </th>
                           <th className="px-4 py-3 text-left text-xs font-semibold uppercase text-slate-700">
@@ -521,7 +547,7 @@ export default function ShiftsPage() {
                             </td>
 
                             <td className="px-4 py-3 text-sm font-medium text-slate-900">
-                              {shift.start_time}–{shift.end_time}
+                              {formatTime(shift.start_time)}–{formatTime(shift.end_time)}
                             </td>
 
                             <td className="px-4 py-3 text-sm font-medium text-slate-900">
@@ -530,6 +556,14 @@ export default function ShiftsPage() {
 
                             <td className="px-4 py-3 text-sm text-slate-600">
                               {formatDays(shift.days_of_week)}
+                            </td>
+
+                            <td className="px-4 py-3 text-sm text-slate-600">
+                              {formatDate(shift.start_date)}
+                            </td>
+
+                            <td className="px-4 py-3 text-sm text-slate-600">
+                              {formatDate(shift.end_date)}
                             </td>
 
                             <td className="px-4 py-3">
