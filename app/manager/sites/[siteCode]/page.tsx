@@ -182,24 +182,30 @@ export default function SiteDetailPage() {
     return data ? data.map(u => ({ id: u.id, name: u.full_name })) : []
   }
 
-  const handleOpenEditModal = async () => {
-    console.log('[v0] handleOpenEditModal called at', new Date().toISOString())
+  const handleOpenEditModal = () => {
+    // STEP 1: Immediately open modal - NO ASYNC
+    console.log('[v0] handleOpenEditModal called - SYNC VERSION')
     if (!site) {
-      console.log('[v0] site is null, returning')
+      console.log('[v0] site is null')
       return
     }
-    console.log('[v0] site exists:', site.site_code)
-    console.log('[v0] fetching supervisors...')
-    const supervisors = await fetchSupervisors()
-    console.log('[v0] supervisors fetched:', supervisors.length, 'supervisors')
-    console.log('[v0] setting all state at once...')
-    setSupervisorList(supervisors)
+    
+    // Set form fields synchronously
     setEditName(site.name)
     setEditAddress(site.address || '')
     setEditSupervisor(supervisor?.id || '')
-    console.log('[v0] calling setIsEditModalOpen(true)')
+    
+    // Open modal immediately
     setIsEditModalOpen(true)
-    console.log('[v0] setIsEditModalOpen(true) called, state should update in next render')
+    console.log('[v0] Modal opened, fetching supervisors in background...')
+    
+    // Fetch supervisors AFTER modal is open
+    fetchSupervisors().then(supervisors => {
+      console.log('[v0] Supervisors loaded:', supervisors.length)
+      setSupervisorList(supervisors)
+    }).catch(err => {
+      console.error('[v0] Error fetching supervisors:', err)
+    })
   }
 
   const handleSaveEdit = async () => {
