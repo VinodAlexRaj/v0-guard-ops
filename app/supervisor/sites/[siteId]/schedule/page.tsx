@@ -185,15 +185,20 @@ export default function SchedulePage() {
 
       if (shiftDefsError) throw shiftDefsError
 
-      // Query 3 — get assignments for these slots
+      // Query 3 — get assignments for these slots (skip if no slots)
       const slotIds = (slotsData || []).map(s => s.id)
-      const { data: assignmentsData, error: assignmentsError } = await supabase
-        .from('shift_assignments')
-        .select('id, roster_slot_id, guard_id, assignment_type, is_cancelled')
-        .in('roster_slot_id', slotIds.length > 0 ? slotIds : ['null'])
-        .eq('is_cancelled', false)
+      let assignmentsData: Assignment[] = []
+      
+      if (slotIds.length > 0) {
+        const { data, error: assignmentsError } = await supabase
+          .from('shift_assignments')
+          .select('id, roster_slot_id, guard_id, assignment_type, is_cancelled')
+          .in('roster_slot_id', slotIds)
+          .eq('is_cancelled', false)
 
-      if (assignmentsError) throw assignmentsError
+        if (assignmentsError) throw assignmentsError
+        assignmentsData = data || []
+      }
 
       // Query 4 — get names for assigned users
       const guardIds = [...new Set((assignmentsData || []).map(a => a.guard_id))]
