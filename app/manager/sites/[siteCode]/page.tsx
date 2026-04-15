@@ -184,9 +184,9 @@ export default function SiteDetailPage() {
     }
   }
 
-  const handleOpenEditModal = () => {
+  const handleOpenEditModal = async () => {
     if (!site) return
-    fetchSupervisors()
+    await fetchSupervisors()
     setEditName(site.name)
     setEditAddress(site.address || '')
     setEditSupervisor(supervisor?.id || '')
