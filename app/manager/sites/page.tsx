@@ -7,14 +7,21 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table'
-import { LogOut, ArrowRight } from 'lucide-react'
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from '@/components/ui/dialog'
+import { Label } from '@/components/ui/label'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
+import { LogOut, ArrowRight, Plus } from 'lucide-react'
 import { supabase } from '@/lib/supabase/client'
 import { getLocalDateString } from '@/lib/utils'
 
@@ -41,6 +48,15 @@ export default function ManagerSitesPage() {
   const [totalSites, setTotalSites] = useState(0)
   const [sitesWithGaps, setSitesWithGaps] = useState(0)
   const [fullyFilled, setFullyFilled] = useState(0)
+  
+  // Add Site modal state
+  const [isAddModalOpen, setIsAddModalOpen] = useState(false)
+  const [newSiteCode, setNewSiteCode] = useState('')
+  const [newSiteName, setNewSiteName] = useState('')
+  const [newSiteAddress, setNewSiteAddress] = useState('')
+  const [newSiteSupervisor, setNewSiteSupervisor] = useState('')
+  const [supervisorList, setSupervisorList] = useState<{ id: string; name: string }[]>([])
+  const [saving, setSaving] = useState(false)
 
   const handleSignOut = () => {
     router.push('/')
@@ -48,6 +64,78 @@ export default function ManagerSitesPage() {
 
   const handleViewSite = (siteCode: string) => {
     router.push(`/manager/sites/${siteCode}`)
+  }
+
+  // Fetch all supervisors for dropdown
+  const fetchSupervisorList = async () => {
+    const { data } = await supabase
+      .from('users')
+      .select('id, full_name')
+      .eq('external_role', 'OPERATIONS EXECUTIVE')
+      .eq('is_active', true)
+    if (data) {
+      setSupervisorList(data.map(u => ({ id: u.id, name: u.full_name })))
+    }
+  }
+
+  const handleOpenAddModal = () => {
+    fetchSupervisorList()
+    setNewSiteCode('')
+    setNewSiteName('')
+    setNewSiteAddress('')
+    setNewSiteSupervisor('')
+    setIsAddModalOpen(true)
+  }
+
+  const handleAddSite = async () => {
+    if (!newSiteCode.trim() || !newSiteName.trim()) {
+      alert('Site code and name are required')
+      return
+    }
+
+    setSaving(true)
+    try {
+      // Insert new site
+      const { data: newSite, error: siteError } = await supabase
+        .from('sites')
+        .insert({
+          site_code: newSiteCode.toUpperCase().trim(),
+          name: newSiteName.trim(),
+          address: newSiteAddress.trim() || null,
+        })
+        .select('id')
+        .single()
+
+      if (siteError) {
+        console.error('[v0] Error creating site:', siteError)
+        alert('Error creating site: ' + siteError.message)
+        setSaving(false)
+        return
+      }
+
+      // Assign supervisor if selected
+      if (newSiteSupervisor && newSite) {
+        const { error: supError } = await supabase
+          .from('supervisor_sites')
+          .insert({
+            supervisor_id: newSiteSupervisor,
+            site_id: newSite.id,
+          })
+
+        if (supError) {
+          console.error('[v0] Error assigning supervisor:', supError)
+        }
+      }
+
+      setIsAddModalOpen(false)
+      // Refresh the page data
+      window.location.reload()
+    } catch (error) {
+      console.error('[v0] Error adding site:', error)
+      alert('Error adding site')
+    } finally {
+      setSaving(false)
+    }
   }
 
   // Set date on mount
@@ -223,13 +311,19 @@ export default function ManagerSitesPage() {
             <h1 className="text-lg font-bold text-slate-900 mb-1">All Sites</h1>
             <p className="text-sm text-slate-600">{totalSites} sites across {supervisors.length - 1} supervisors</p>
           </div>
-          <Input
-            type="text"
-            placeholder="Search site code or name..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-64"
-          />
+          <div className="flex items-center gap-4">
+            <Input
+              type="text"
+              placeholder="Search site code or name..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="w-64"
+            />
+            <Button onClick={handleOpenAddModal} className="bg-teal-600 hover:bg-teal-700 text-white">
+              <Plus className="w-4 h-4 mr-2" />
+              Add Site
+            </Button>
+          </div>
         </div>
 
         {/* Filter Bars */}
@@ -356,6 +450,71 @@ export default function ManagerSitesPage() {
           <span className="text-sm text-slate-600">Showing {filteredSites.length} of {totalSites} sites</span>
         </div>
       </div>
+
+      {/* Add Site Modal */}
+      <Dialog open={isAddModalOpen} onOpenChange={setIsAddModalOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Add New Site</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label htmlFor="siteCode">Site Code *</Label>
+              <Input
+                id="siteCode"
+                placeholder="e.g. KLSNT01"
+                value={newSiteCode}
+                onChange={(e) => setNewSiteCode(e.target.value)}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="siteName">Site Name *</Label>
+              <Input
+                id="siteName"
+                placeholder="e.g. KL Sentral Tower"
+                value={newSiteName}
+                onChange={(e) => setNewSiteName(e.target.value)}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="siteAddress">Address</Label>
+              <Input
+                id="siteAddress"
+                placeholder="e.g. Jalan Stesen Sentral, Kuala Lumpur"
+                value={newSiteAddress}
+                onChange={(e) => setNewSiteAddress(e.target.value)}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="supervisor">Assign Supervisor</Label>
+              <Select value={newSiteSupervisor} onValueChange={setNewSiteSupervisor}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select a supervisor" />
+                </SelectTrigger>
+                <SelectContent>
+                  {supervisorList.map((sup) => (
+                    <SelectItem key={sup.id} value={sup.id}>
+                      {sup.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsAddModalOpen(false)}>
+              Cancel
+            </Button>
+            <Button 
+              onClick={handleAddSite} 
+              disabled={saving}
+              className="bg-teal-600 hover:bg-teal-700 text-white"
+            >
+              {saving ? 'Adding...' : 'Add Site'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </>
   )
 }
