@@ -285,6 +285,14 @@ export default function ManagerSchedulePage() {
 
       if (slotsError) throw slotsError
 
+      console.log('  slotsData returned:', slotsData?.length, 'slots')
+      if (slotsData && slotsData.length > 0) {
+        console.log('  Slots by date:')
+        slotsData.forEach(slot => {
+          console.log(`    ${slot.shift_date}: ${slot.id} (${slot.start_time} to ${slot.end_time})`)
+        })
+      }
+
       const { data: shiftDefsData, error: shiftDefsError } = await supabase
         .from('shift_definitions')
         .select('id, shift_name, shift_code, start_time, required_headcount, site_id')
