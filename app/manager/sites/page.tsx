@@ -486,11 +486,16 @@ export default function ManagerSitesPage() {
 
       const siteDataList: SiteData[] = sitesData.map(site => {
         const sup = supSitesRes.data?.find(s => s.site_id === site.id)
-        // Supabase returns related rows as an array — take first element
-        const usersArr = sup?.users as unknown as { full_name: string }[] | null
-        const supervisorName = Array.isArray(usersArr) && usersArr.length > 0
-          ? usersArr[0].full_name
-          : null
+        // Supabase FK join returns object for single relation, array for multiple
+        const usersData = sup?.users as unknown
+        let supervisorName: string | null = null
+        if (usersData) {
+          if (Array.isArray(usersData) && usersData.length > 0) {
+            supervisorName = usersData[0].full_name
+          } else if (typeof usersData === 'object' && 'full_name' in (usersData as object)) {
+            supervisorName = (usersData as { full_name: string }).full_name
+          }
+        }
         const supervisorId = sup?.supervisor_id ?? null
 
         const activeShifts = shiftDefsRes.data?.filter(sd => sd.site_id === site.id).length || 0
