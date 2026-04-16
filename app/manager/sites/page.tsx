@@ -14,69 +14,55 @@ import {
   DialogFooter,
 } from '@/components/ui/dialog'
 import { Label } from '@/components/ui/label'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
-import { LogOut, ArrowRight, Plus } from 'lucide-react'
+import { LogOut, Eye, MapPin } from 'lucide-react'
 import { supabase } from '@/lib/supabase/client'
 import { getLocalDateString } from '@/lib/utils'
+import { toast } from 'sonner'
 
-interface SiteRow {
-  siteId: string
-  code: string
+interface Site {
+  id: string
+  site_code: string
   name: string
-  supervisor: string
-  supervisorId: string | null
-  activeShifts: number
-  fillRate: number
-  openSlots: number
-  status: string
+  address: string | null
+  latitude: number | null
+  longitude: number | null
+  has_kiosk: boolean
+  geofence_radius: number
 }
 
-interface SupervisorUser {
-  id: string
-  name: string
+interface SiteData {
+  site: Site
+  supervisor: string | null
+  supervisorId: string | null
+  activeShifts: number
+  kioskStatus: 'active' | 'offline' | 'none'
+  deviceCount: number
+  onlineDevices: number
+  checkInsToday: number
 }
 
 export default function ManagerSitesPage() {
   const router = useRouter()
   const [searchQuery, setSearchQuery] = useState('')
-  const [supervisorFilter, setSupervisorFilter] = useState('All')
-  const [statusFilter, setStatusFilter] = useState('All')
+  const [kioskFilter, setKioskFilter] = useState('All')
   const [loading, setLoading] = useState(true)
   const [dateStr, setDateStr] = useState('')
   const [managerName, setManagerName] = useState('User')
-  const [allSites, setAllSites] = useState<SiteRow[]>([])
-  const [supervisors, setSupervisors] = useState<string[]>(['All'])
+  const [allSites, setAllSites] = useState<SiteData[]>([])
+
+  // Geofence modal state
+  const [isGeofenceModalOpen, setIsGeofenceModalOpen] = useState(false)
+  const [selectedSite, setSelectedSite] = useState<SiteData | null>(null)
+  const [geofenceLat, setGeofenceLat] = useState('')
+  const [geofenceLon, setGeofenceLon] = useState('')
+  const [geofenceRadius, setGeofenceRadius] = useState('')
+  const [savingGeofence, setSavingGeofence] = useState(false)
+
+  // Summary stats
   const [totalSites, setTotalSites] = useState(0)
-  const [sitesWithGaps, setSitesWithGaps] = useState(0)
-  const [fullyFilled, setFullyFilled] = useState(0)
-  
-  // Add Site modal state
-  const [isAddModalOpen, setIsAddModalOpen] = useState(false)
-  const [newSiteCode, setNewSiteCode] = useState('')
-  const [newSiteName, setNewSiteName] = useState('')
-  const [newSiteAddress, setNewSiteAddress] = useState('')
-  const [newSiteSupervisor, setNewSiteSupervisor] = useState('')
-  const [supervisorList, setSupervisorList] = useState<{ id: string; name: string }[]>([])
-  const [saving, setSaving] = useState(false)
-
-  const [supervisorUsers, setSupervisorUsers] = useState<SupervisorUser[]>([])
-  const [showAssignSupervisor, setShowAssignSupervisor] = useState(false)
-  const [assigningSite, setAssigningSite] = useState<SiteRow | null>(null)
-  const [selectedSupervisorId, setSelectedSupervisorId] = useState('')
-  const [assignLoading, setAssignLoading] = useState(false)
-  const [assignError, setAssignError] = useState('')
-
-  // Bulk selection
-  const [selectedSiteIds, setSelectedSiteIds] = useState<Set<string>>(new Set())
-  const [bulkSupervisorId, setBulkSupervisorId] = useState('')
-  const [bulkLoading, setBulkLoading] = useState(false)
-  const [bulkError, setBulkError] = useState('')
+  const [sitesWithKiosk, setSitesWithKiosk] = useState(0)
+  const [geofenceConfigured, setGeofenceConfigured] = useState(0)
+  const [totalCheckinsToday, setTotalCheckinsToday] = useState(0)
 
   const handleSignOut = () => {
     router.push('/')
@@ -86,75 +72,52 @@ export default function ManagerSitesPage() {
     router.push(`/manager/sites/${siteCode}`)
   }
 
-  // Fetch all supervisors for dropdown
-  const fetchSupervisorList = async () => {
-    const { data } = await supabase
-      .from('users')
-      .select('id, full_name')
-      .eq('external_role', 'OPERATIONS EXECUTIVE')
-      .eq('is_active', true)
-    if (data) {
-      setSupervisorList(data.map(u => ({ id: u.id, name: u.full_name })))
-    }
+  const handleOpenGeofenceModal = (site: SiteData) => {
+    setSelectedSite(site)
+    setGeofenceLat(site.site.latitude?.toString() || '')
+    setGeofenceLon(site.site.longitude?.toString() || '')
+    setGeofenceRadius(site.site.geofence_radius?.toString() || '30')
+    setIsGeofenceModalOpen(true)
   }
 
-  const handleOpenAddModal = () => {
-    fetchSupervisorList()
-    setNewSiteCode('')
-    setNewSiteName('')
-    setNewSiteAddress('')
-    setNewSiteSupervisor('')
-    setIsAddModalOpen(true)
-  }
-
-  const handleAddSite = async () => {
-    if (!newSiteCode.trim() || !newSiteName.trim()) {
-      alert('Site code and name are required')
+  const handleSaveGeofence = async () => {
+    if (!selectedSite) return
+    if (!geofenceLat || !geofenceLon || !geofenceRadius) {
+      toast.error('All geofence fields are required')
       return
     }
 
-    setSaving(true)
+    const lat = parseFloat(geofenceLat)
+    const lon = parseFloat(geofenceLon)
+    const radius = parseInt(geofenceRadius)
+
+    if (isNaN(lat) || isNaN(lon) || isNaN(radius) || radius < 10 || radius > 500) {
+      toast.error('Please enter valid coordinates and radius (10-500m)')
+      return
+    }
+
+    setSavingGeofence(true)
     try {
-      // Insert new site
-      const { data: newSite, error: siteError } = await supabase
+      const { error } = await supabase
         .from('sites')
-        .insert({
-          site_code: newSiteCode.toUpperCase().trim(),
-          name: newSiteName.trim(),
-          address: newSiteAddress.trim() || null,
+        .update({
+          latitude: lat,
+          longitude: lon,
+          geofence_radius: radius,
+          has_kiosk: true,
         })
-        .select('id')
-        .single()
+        .eq('id', selectedSite.site.id)
 
-      if (siteError) {
-        console.error('[v0] Error creating site:', siteError)
-        alert('Error creating site: ' + siteError.message)
-        setSaving(false)
-        return
-      }
+      if (error) throw error
 
-      // Assign supervisor if selected
-      if (newSiteSupervisor && newSite) {
-        const { error: supError } = await supabase
-          .from('supervisor_sites')
-          .insert({
-            supervisor_id: newSiteSupervisor,
-            site_id: newSite.id,
-          })
-
-        if (supError) {
-          console.error('[v0] Error assigning supervisor:', supError)
-        }
-      }
-
-      setIsAddModalOpen(false)
-      // Refresh the page data
-      window.location.reload()
+      toast.success('Geofence configuration saved')
+      setIsGeofenceModalOpen(false)
+      fetchSites()
     } catch (error) {
-      console.error('[v0] Error adding site:', error)
-      alert('Error adding site')
+      console.error('[v0] Error saving geofence:', error)
+      toast.error('Failed to save geofence configuration')
     } finally {
-      setSaving(false)
+      setSavingGeofence(false)
     }
   }
 
@@ -170,24 +133,12 @@ export default function ManagerSitesPage() {
     setDateStr(formatted)
   }, [])
 
-  // Fetch real data from Supabase
+  // Fetch all data
   const fetchSites = async () => {
     try {
       setLoading(true)
 
-      // FETCH 1 — Get all sites
-      const { data: sites } = await supabase
-        .from('sites')
-        .select('id, site_code, name, address')
-
-      if (!sites || sites.length === 0) {
-        setLoading(false)
-        return
-      }
-
-      const siteIds = sites.map(s => s.id)
-
-      // Get current manager name
+      // Get manager name
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) {
         router.push('/')
@@ -200,88 +151,87 @@ export default function ManagerSitesPage() {
         .single()
       if (userData?.full_name) setManagerName(userData.full_name)
 
-      // FETCH 2 — Get today's coverage
-      const today = getLocalDateString()
-      const { data: coverage } = await supabase
-        .from('roster_coverage')
-        .select('site_id, assigned, required_headcount')
-        .in('site_id', siteIds)
-        .eq('shift_date', today)
+      // FETCH 1 — All sites with geofence data
+      const { data: sitesData } = await supabase
+        .from('sites')
+        .select('id, site_code, name, address, latitude, longitude, has_kiosk, geofence_radius')
 
-      // FETCH 3 — Get shift definitions count per site
+      if (!sitesData || sitesData.length === 0) {
+        setLoading(false)
+        return
+      }
+
+      const siteIds = sitesData.map(s => s.id)
+      const today = getLocalDateString()
+
+      // FETCH 2 — Supervisors for each site
+      const { data: supSites } = await supabase
+        .from('supervisor_sites')
+        .select('supervisor_id, site_id, users(full_name)')
+        .in('site_id', siteIds)
+
+      // FETCH 3 — Active shift definitions count
       const { data: shiftDefs } = await supabase
         .from('shift_definitions')
         .select('id, site_id')
         .in('site_id', siteIds)
         .eq('is_active', true)
 
-      // FETCH 4 — Get supervisor assignments
-      const { data: supSites } = await supabase
-        .from('supervisor_sites')
-        .select('supervisor_id, site_id, users(full_name)')
+      // FETCH 4 — Device management (kiosk status)
+      const { data: devices } = await supabase
+        .from('device_management')
+        .select('site_id, device_id, online_status, is_enabled')
+        .in('site_id', siteIds)
 
-      // FETCH 5 — Get all supervisors for assign dialog (via users_with_role)
-      const { data: supervisorRoles } = await supabase
-        .from('users_with_role')
-        .select('id')
-        .eq('role', 'supervisor')
+      // FETCH 5 — Today's check-ins
+      const { data: checkins } = await supabase
+        .from('attendance_check_ins')
+        .select('site_id, id, created_at')
+        .in('site_id', siteIds)
+        .gte('created_at', today + 'T00:00:00')
+        .lt('created_at', today + 'T23:59:59')
 
-      const supervisorIds = (supervisorRoles || []).map(r => r.id)
-      if (supervisorIds.length > 0) {
-        const { data: supUsers } = await supabase
-          .from('users')
-          .select('id, full_name')
-          .in('id', supervisorIds)
-          .eq('is_active', true)
-          .order('full_name')
-        setSupervisorUsers((supUsers || []).map(u => ({ id: u.id, name: u.full_name })))
-      }
+      // BUILD SITE DATA
+      const siteDataList: SiteData[] = sitesData.map(site => {
+        const sup = supSites?.find(s => s.site_id === site.id)
+        const supervisorName = (sup?.users as { full_name: string } | null)?.full_name || null
+        const supervisorId = sup?.supervisor_id || null
 
-      // BUILD TABLE ROWS
-      const covData = coverage || []
-      const shiftData = shiftDefs || []
-      const supData = supSites || []
+        const activeShifts = shiftDefs?.filter(sd => sd.site_id === site.id).length || 0
 
-      const rows: SiteRow[] = sites.map(site => {
-        const siteCov = covData.filter(c => c.site_id === site.id)
-        const totalRequired = siteCov.reduce((sum, c) => sum + c.required_headcount, 0)
-        const totalAssigned = siteCov.reduce((sum, c) => sum + c.assigned, 0)
-        const fillRate = totalRequired > 0 ? Math.round((totalAssigned / totalRequired) * 100) : 100
-        const openSlots = Math.max(0, totalRequired - totalAssigned)
+        const siteDevices = devices?.filter(d => d.site_id === site.id) || []
+        const enabledDevices = siteDevices.filter(d => d.is_enabled)
+        const onlineEnabled = enabledDevices.filter(d => d.online_status)
 
-        const activeShifts = shiftData.filter(sd => sd.site_id === site.id).length
-        const supervisorAssignment = supData.find(ss => ss.site_id === site.id)
-        const supervisor = supervisorAssignment?.users?.full_name || 'Unassigned'
-        const supervisorId = supervisorAssignment?.supervisor_id || null
+        let kioskStatus: 'active' | 'offline' | 'none' = 'none'
+        if (site.has_kiosk) {
+          kioskStatus = onlineEnabled.length > 0 ? 'active' : 'offline'
+        }
+
+        const todayCheckins = checkins?.filter(c => c.site_id === site.id).length || 0
 
         return {
-          siteId: site.id,
-          code: site.site_code,
-          name: site.name,
-          supervisor,
+          site,
+          supervisor: supervisorName,
           supervisorId,
-          activeShifts: activeShifts || 0,
-          fillRate,
-          openSlots,
-          status: 'Active',
+          activeShifts,
+          kioskStatus,
+          deviceCount: enabledDevices.length,
+          onlineDevices: onlineEnabled.length,
+          checkInsToday: todayCheckins,
         }
       })
 
-      setAllSites(rows)
+      setAllSites(siteDataList)
 
       // Calculate summary stats
-      const gaps = rows.filter(r => r.openSlots > 0).length
-      const filled = rows.filter(r => r.openSlots === 0).length
-
-      setTotalSites(rows.length)
-      setSitesWithGaps(gaps)
-      setFullyFilled(filled)
-
-      // Extract unique supervisor names for filter
-      const uniqueSupervisors = ['All', ...new Set(rows.map(r => r.supervisor).filter(s => s !== 'Unassigned'))]
-      setSupervisors(uniqueSupervisors)
+      setTotalSites(siteDataList.length)
+      setSitesWithKiosk(siteDataList.filter(s => s.site.has_kiosk).length)
+      setGeofenceConfigured(siteDataList.filter(s => s.site.latitude !== null).length)
+      setTotalCheckinsToday(siteDataList.reduce((sum, s) => sum + s.checkInsToday, 0))
     } catch (error) {
       console.error('[v0] Error fetching sites:', error)
+      toast.error('Failed to load sites')
     } finally {
       setLoading(false)
     }
@@ -293,30 +243,20 @@ export default function ManagerSitesPage() {
 
   // Filter and search
   const filteredSites = useMemo(() => {
-    return allSites.filter((site) => {
+    return allSites.filter(siteData => {
       const matchesSearch =
         !searchQuery ||
-        site.code.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        site.name.toLowerCase().includes(searchQuery.toLowerCase())
+        siteData.site.site_code.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        siteData.site.name.toLowerCase().includes(searchQuery.toLowerCase())
 
-      const matchesSupervisor = supervisorFilter === 'All' || site.supervisor === supervisorFilter
-      const matchesStatus = statusFilter === 'All' || site.status === statusFilter
+      const matchesKioskFilter =
+        kioskFilter === 'All' ||
+        (kioskFilter === 'Has Kiosk' && siteData.site.has_kiosk) ||
+        (kioskFilter === 'No Kiosk' && !siteData.site.has_kiosk)
 
-      return matchesSearch && matchesSupervisor && matchesStatus
+      return matchesSearch && matchesKioskFilter
     })
-  }, [allSites, searchQuery, supervisorFilter, statusFilter])
-
-  const allFilteredSelected =
-    filteredSites.length > 0 && filteredSites.every(s => selectedSiteIds.has(s.siteId))
-  const someFilteredSelected =
-    filteredSites.some(s => selectedSiteIds.has(s.siteId)) && !allFilteredSelected
-  const anySelected = selectedSiteIds.size > 0
-
-  const getFillRateColor = (rate: number) => {
-    if (rate >= 80) return 'bg-green-100 text-green-700 border-0'
-    if (rate >= 50) return 'bg-amber-100 text-amber-700 border-0'
-    return 'bg-red-100 text-red-700 border-0'
-  }
+  }, [allSites, searchQuery, kioskFilter])
 
   return (
     <>
@@ -345,167 +285,145 @@ export default function ManagerSitesPage() {
       </header>
 
       {/* Page Content */}
-      <div className={`p-8 ${anySelected ? 'pb-28' : ''}`}>
-        {/* Header with Search */}
-        <div className="mb-8 flex items-center justify-between">
-          <div>
-            <h1 className="text-lg font-bold text-slate-900 mb-1">All Sites</h1>
-            <p className="text-sm text-slate-600">{totalSites} sites across {supervisors.length - 1} supervisors</p>
-          </div>
-          <div className="flex items-center gap-4">
-            <Input
-              type="text"
-              placeholder="Search site code or name..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-64"
-            />
-            <Button onClick={handleOpenAddModal} className="bg-teal-600 hover:bg-teal-700 text-white">
-              <Plus className="w-4 h-4 mr-2" />
-              Add Site
-            </Button>
-          </div>
+      <div className="p-8">
+        {/* Page Title */}
+        <div className="mb-6">
+          <h1 className="text-2xl font-bold text-slate-900">Sites Management</h1>
+          <p className="text-sm text-slate-600 mt-1">Monitor kiosk status, geofence configuration, and check-ins</p>
         </div>
 
-        {/* Filter Bars */}
-        <div className="mb-4 flex gap-6">
-          {/* Supervisor Filter */}
+        {/* Summary Cards */}
+        <div className="grid grid-cols-4 gap-4 mb-6">
+          <Card className="p-4 border-slate-200">
+            <p className="text-xs font-semibold text-slate-500 uppercase">Total Sites</p>
+            <p className="text-2xl font-bold text-slate-900 mt-2">{totalSites}</p>
+          </Card>
+          <Card className="p-4 border-slate-200">
+            <p className="text-xs font-semibold text-slate-500 uppercase">Sites with Kiosk</p>
+            <p className="text-2xl font-bold text-teal-600 mt-2">{sitesWithKiosk}</p>
+          </Card>
+          <Card className="p-4 border-slate-200">
+            <p className="text-xs font-semibold text-slate-500 uppercase">Geofence Configured</p>
+            <p className="text-2xl font-bold text-blue-600 mt-2">{geofenceConfigured}</p>
+          </Card>
+          <Card className="p-4 border-slate-200">
+            <p className="text-xs font-semibold text-slate-500 uppercase">Check-ins Today</p>
+            <p className="text-2xl font-bold text-green-600 mt-2">{totalCheckinsToday}</p>
+          </Card>
+        </div>
+
+        {/* Search and Filter */}
+        <div className="mb-6 flex items-center gap-4">
+          <Input
+            type="text"
+            placeholder="Search site code or name..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="flex-1 max-w-md"
+          />
           <div className="flex items-center gap-2">
-            <span className="text-sm font-medium text-slate-700">Supervisor:</span>
+            <span className="text-sm font-medium text-slate-700">Filter:</span>
             <div className="flex gap-2">
-              {supervisors.map((sup) => (
+              {['All', 'Has Kiosk', 'No Kiosk'].map(filter => (
                 <button
-                  key={sup}
-                  onClick={() => setSupervisorFilter(sup)}
-                  className={`px-4 py-2 rounded-full text-sm font-medium transition ${
-                    supervisorFilter === sup
-                      ? 'bg-slate-900 text-white'
+                  key={filter}
+                  onClick={() => setKioskFilter(filter)}
+                  className={`px-3 py-1.5 rounded text-sm font-medium transition ${
+                    kioskFilter === filter
+                      ? 'bg-teal-600 text-white'
                       : 'bg-slate-200 text-slate-700 hover:bg-slate-300'
                   }`}
                 >
-                  {sup}
+                  {filter}
                 </button>
               ))}
             </div>
           </div>
-
-          {/* Status Filter */}
-          <div className="flex items-center gap-2">
-            <span className="text-sm font-medium text-slate-700">Status:</span>
-            <div className="flex gap-2">
-              {['All', 'Active', 'Inactive'].map((status) => (
-                <button
-                  key={status}
-                  onClick={() => setStatusFilter(status)}
-                  className={`px-4 py-2 rounded-full text-sm font-medium transition ${
-                    statusFilter === status
-                      ? 'bg-slate-900 text-white'
-                      : 'bg-slate-200 text-slate-700 hover:bg-slate-300'
-                  }`}
-                >
-                  {status}
-                </button>
-              ))}
-            </div>
-          </div>
-        </div>
-
-        {/* Summary Row - 3 Cards */}
-        <div className="grid grid-cols-3 gap-4 mb-6">
-          <Card className="bg-blue-50 border-blue-200 p-4">
-            <div className="text-sm text-slate-600">Total sites</div>
-            <div className="text-2xl font-bold text-blue-600">{totalSites}</div>
-          </Card>
-          <Card className="bg-red-50 border-red-200 p-4">
-            <div className="text-sm text-slate-600">Sites with gaps today</div>
-            <div className="text-2xl font-bold text-red-600">{sitesWithGaps}</div>
-          </Card>
-          <Card className="bg-green-50 border-green-200 p-4">
-            <div className="text-sm text-slate-600">Fully filled</div>
-            <div className="text-2xl font-bold text-green-600">{fullyFilled}</div>
-          </Card>
+          <span className="text-sm text-slate-600">{filteredSites.length} sites</span>
         </div>
 
         {/* Sites Table */}
         <Card className="border-slate-200 overflow-hidden">
           {loading ? (
-            <div className="p-8 text-center text-slate-600">Loading sites data...</div>
+            <div className="p-8 text-center text-slate-600">Loading sites...</div>
           ) : filteredSites.length === 0 ? (
             <div className="p-8 text-center text-slate-600">No sites found matching your filters.</div>
           ) : (
             <table className="w-full">
-              <thead className="bg-slate-50">
-                <tr className="border-slate-200">
-                  <th className="px-4 py-3 w-10">
-                    <Checkbox
-                      checked={someFilteredSelected ? 'indeterminate' : allFilteredSelected}
-                      onCheckedChange={() => toggleAll(filteredSites)}
-                      aria-label="Select all"
-                    />
-                  </th>
-                  <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700">Site Code</th>
-                  <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700">Site Name</th>
-                  <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700">Supervisor</th>
-                  <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700">Active shifts</th>
-                  <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700">Fill rate</th>
-                  <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700">Open slots</th>
-                  <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700">Action</th>
+              <thead className="bg-slate-50 border-b border-slate-200">
+                <tr>
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-slate-700 uppercase">Site Code</th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-slate-700 uppercase">Site Name</th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-slate-700 uppercase">Supervisor</th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-slate-700 uppercase">Kiosk</th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-slate-700 uppercase">Geofence</th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-slate-700 uppercase">Check-ins Today</th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-slate-700 uppercase">Active Shifts</th>
+                  <th className="px-4 py-3 text-right text-xs font-semibold text-slate-700 uppercase">Actions</th>
                 </tr>
               </thead>
-              <tbody>
-                {filteredSites.map((site, idx) => (
-                  <tr
-                    key={idx}
-                    className={`border-b border-slate-200 hover:bg-slate-50 ${
-                      selectedSiteIds.has(site.siteId) ? 'bg-slate-100' : ''
-                    }`}
-                  >
+              <tbody className="divide-y divide-slate-200">
+                {filteredSites.map(siteData => (
+                  <tr key={siteData.site.id} className="hover:bg-slate-50">
                     <td className="px-4 py-3">
-                      <Checkbox
-                        checked={selectedSiteIds.has(site.siteId)}
-                        onCheckedChange={() => toggleSite(site.siteId)}
-                        aria-label={`Select ${site.name}`}
-                      />
-                    </td>
-                    <td className="px-4 py-3">
-                      <span className="font-mono text-sm font-medium text-slate-900">{site.code}</span>
-                    </td>
-                    <td className="px-4 py-3">
-                      <span className="text-sm text-slate-900">{site.name}</span>
-                    </td>
-                    <td className="px-4 py-3">
-                      <span className="text-sm text-slate-700">{site.supervisor}</span>
-                    </td>
-                    <td className="px-4 py-3">
-                      <span className="text-sm text-slate-700">{site.activeShifts}</span>
-                    </td>
-                    <td className="px-4 py-3">
-                      <Badge className={getFillRateColor(site.fillRate)}>
-                        {site.fillRate}%
+                      <Badge variant="outline" className="font-mono">
+                        {siteData.site.site_code}
                       </Badge>
                     </td>
                     <td className="px-4 py-3">
-                      <span className="text-sm text-slate-700">{site.openSlots}</span>
+                      <div>
+                        <p className="font-medium text-sm text-slate-900">{siteData.site.name}</p>
+                        {siteData.site.address && (
+                          <p className="text-xs text-slate-500">{siteData.site.address}</p>
+                        )}
+                      </div>
                     </td>
                     <td className="px-4 py-3">
-                      <div className="flex items-center gap-2">
+                      <p className="text-sm text-slate-900">
+                        {siteData.supervisor || <span className="italic text-slate-400">Unassigned</span>}
+                      </p>
+                    </td>
+                    <td className="px-4 py-3">
+                      {siteData.site.has_kiosk ? (
+                        <Badge className={siteData.kioskStatus === 'active' ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'}>
+                          {siteData.kioskStatus === 'active' ? 'Active' : 'Offline'}
+                        </Badge>
+                      ) : (
+                        <Badge variant="outline" className="text-slate-500">No Kiosk</Badge>
+                      )}
+                    </td>
+                    <td className="px-4 py-3">
+                      <p className="text-sm text-slate-900">
+                        {siteData.site.latitude !== null ? `${siteData.site.geofence_radius}m` : <span className="italic text-slate-400">Not configured</span>}
+                      </p>
+                    </td>
+                    <td className="px-4 py-3">
+                      <p className="text-sm font-medium text-slate-900">
+                        {siteData.checkInsToday || '—'}
+                      </p>
+                    </td>
+                    <td className="px-4 py-3">
+                      <p className="text-sm text-slate-900">{siteData.activeShifts}</p>
+                    </td>
+                    <td className="px-4 py-3 text-right">
+                      <div className="flex items-center justify-end gap-2">
                         <Button
-                          variant="outline"
+                          variant="ghost"
                           size="sm"
-                          onClick={() => handleOpenAssign(site)}
-                          className="text-slate-700 border-slate-300 hover:bg-slate-50"
+                          onClick={() => handleViewSite(siteData.site.site_code)}
+                          className="text-slate-600 hover:text-slate-900"
+                          title="View site details"
                         >
-                          <UserCheck className="w-3.5 h-3.5 mr-1.5" />
-                          {site.supervisor === 'Unassigned' ? 'Assign' : 'Reassign'}
+                          <Eye className="w-4 h-4" />
                         </Button>
                         <Button
                           variant="ghost"
                           size="sm"
-                          onClick={() => handleViewSite(site.code)}
-                          className="text-slate-600 hover:text-slate-900"
+                          onClick={() => handleOpenGeofenceModal(siteData)}
+                          className="text-teal-600 hover:text-teal-900"
+                          title="Configure geofence"
                         >
-                          View
-                          <ArrowRight className="w-4 h-4 ml-2" />
+                          <MapPin className="w-4 h-4" />
                         </Button>
                       </div>
                     </td>
@@ -515,73 +433,74 @@ export default function ManagerSitesPage() {
             </table>
           )}
         </Card>
-
-        {/* Footer */}
-        <div className="mt-4">
-          <span className="text-sm text-slate-600">Showing {filteredSites.length} of {totalSites} sites</span>
-        </div>
       </div>
 
-      {/* Add Site Modal */}
-      <Dialog open={isAddModalOpen} onOpenChange={setIsAddModalOpen}>
+      {/* Geofence Config Modal */}
+      <Dialog open={isGeofenceModalOpen} onOpenChange={setIsGeofenceModalOpen}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>Add New Site</DialogTitle>
+            <DialogTitle>Configure Geofence</DialogTitle>
           </DialogHeader>
-          <div className="space-y-4 py-4">
-            <div className="space-y-2">
-              <Label htmlFor="siteCode">Site Code *</Label>
-              <Input
-                id="siteCode"
-                placeholder="e.g. KLSNT01"
-                value={newSiteCode}
-                onChange={(e) => setNewSiteCode(e.target.value)}
-              />
+          {selectedSite && (
+            <div className="space-y-4 py-4">
+              <p className="text-sm text-slate-600">
+                Configure geofence for <span className="font-medium">{selectedSite.site.site_code} - {selectedSite.site.name}</span>
+              </p>
+              <div className="space-y-3">
+                <div>
+                  <Label htmlFor="latitude">Latitude</Label>
+                  <Input
+                    id="latitude"
+                    type="number"
+                    step="0.0001"
+                    value={geofenceLat}
+                    onChange={(e) => setGeofenceLat(e.target.value)}
+                    placeholder="e.g. 3.1390"
+                    className="text-sm"
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="longitude">Longitude</Label>
+                  <Input
+                    id="longitude"
+                    type="number"
+                    step="0.0001"
+                    value={geofenceLon}
+                    onChange={(e) => setGeofenceLon(e.target.value)}
+                    placeholder="e.g. 101.6869"
+                    className="text-sm"
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="radius">Radius (meters, 10-500)</Label>
+                  <Input
+                    id="radius"
+                    type="number"
+                    min="10"
+                    max="500"
+                    value={geofenceRadius}
+                    onChange={(e) => setGeofenceRadius(e.target.value)}
+                    placeholder="e.g. 30"
+                    className="text-sm"
+                  />
+                </div>
+              </div>
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="siteName">Site Name *</Label>
-              <Input
-                id="siteName"
-                placeholder="e.g. KL Sentral Tower"
-                value={newSiteName}
-                onChange={(e) => setNewSiteName(e.target.value)}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="siteAddress">Address</Label>
-              <Input
-                id="siteAddress"
-                placeholder="e.g. Jalan Stesen Sentral, Kuala Lumpur"
-                value={newSiteAddress}
-                onChange={(e) => setNewSiteAddress(e.target.value)}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="supervisor">Assign Supervisor</Label>
-              <Select value={newSiteSupervisor} onValueChange={setNewSiteSupervisor}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Select a supervisor" />
-                </SelectTrigger>
-                <SelectContent>
-                  {supervisorList.map((sup) => (
-                    <SelectItem key={sup.id} value={sup.id}>
-                      {sup.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
+          )}
           <DialogFooter>
-            <Button variant="outline" onClick={() => setIsAddModalOpen(false)}>
+            <Button
+              variant="outline"
+              onClick={() => setIsGeofenceModalOpen(false)}
+              className="text-slate-700 border-slate-300"
+            >
               Cancel
             </Button>
-            <Button 
-              onClick={handleAddSite} 
-              disabled={saving}
-              className="bg-teal-600 hover:bg-teal-700 text-white"
+            <Button
+              onClick={handleSaveGeofence}
+              disabled={savingGeofence}
+              className="bg-teal-600 hover:bg-teal-700"
             >
-              {saving ? 'Adding...' : 'Add Site'}
+              {savingGeofence ? 'Saving...' : 'Save'}
             </Button>
           </DialogFooter>
         </DialogContent>
