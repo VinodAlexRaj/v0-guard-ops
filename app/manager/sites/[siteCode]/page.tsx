@@ -31,6 +31,9 @@ interface SiteData {
   site_code: string
   name: string
   address: string | null
+  latitude: number | null
+  longitude: number | null
+  geofence_radius: number | null
 }
 
 interface ShiftDefinition {
@@ -60,6 +63,11 @@ export default function SiteDetailPage() {
   const [editName, setEditName] = useState('')
   const [editAddress, setEditAddress] = useState('')
   const [editSupervisor, setEditSupervisor] = useState('unassigned')
+  const [editSiteCode, setEditSiteCode] = useState('')
+  const [editSiteCodeError, setEditSiteCodeError] = useState('')
+  const [editLatitude, setEditLatitude] = useState('')
+  const [editLongitude, setEditLongitude] = useState('')
+  const [editRadius, setEditRadius] = useState('30')
   const [supervisorList, setSupervisorList] = useState<{ id: string; name: string }[]>([])
   const [saving, setSaving] = useState(false)
 
@@ -102,7 +110,7 @@ export default function SiteDetailPage() {
 
         const { data: siteData, error: siteError } = await supabase
           .from('sites')
-          .select('id, site_code, name, address')
+          .select('id, site_code, name, address, latitude, longitude, geofence_radius')
           .eq('site_code', siteCode)
           .single()
 
@@ -184,12 +192,19 @@ export default function SiteDetailPage() {
     return data ? data.map(u => ({ id: u.id, name: u.full_name })) : []
   }
 
+  const validateSiteCode = (code: string) => /^[A-Z]{5}[0-9]{2}$/.test(code)
+
   const handleOpenEditModal = () => {
     if (!site) return
 
+    setEditSiteCode(site.site_code)
+    setEditSiteCodeError('')
     setEditName(site.name)
     setEditAddress(site.address || '')
     setEditSupervisor(supervisor?.id || 'unassigned')
+    setEditLatitude(site.latitude != null ? String(site.latitude) : '')
+    setEditLongitude(site.longitude != null ? String(site.longitude) : '')
+    setEditRadius(site.geofence_radius != null ? String(site.geofence_radius) : '30')
     setIsEditModalOpen(true)
 
     fetchSupervisors()
@@ -202,66 +217,106 @@ export default function SiteDetailPage() {
   }
 
   const handleSaveEdit = async () => {
-    if (!site || !editName.trim()) {
-      alert('Site name is required')
+    if (!site) return
+    if (!editName.trim()) { alert('Site name is required'); return }
+    if (!validateSiteCode(editSiteCode)) {
+      setEditSiteCodeError('Format: 5 letters + 2 digits (e.g. KLSNT01)')
       return
+    }
+
+    // Validate geofence if provided
+    let geoValues: { lat: number; lon: number; radius: number } | null = null
+    if (editLatitude || editLongitude) {
+      const lat = parseFloat(editLatitude)
+      const lon = parseFloat(editLongitude)
+      const radius = parseInt(editRadius)
+      if (isNaN(lat) || isNaN(lon) || isNaN(radius) || radius < 10 || radius > 500) {
+        alert('Enter valid coordinates and radius (10–500 m)')
+        return
+      }
+      geoValues = { lat, lon, radius }
     }
 
     setSaving(true)
     try {
+      const updatePayload: Record<string, unknown> = {
+        site_code: editSiteCode.toUpperCase(),
+        name: editName.trim(),
+        address: editAddress.trim() || null,
+      }
+      if (geoValues) {
+        updatePayload.latitude = geoValues.lat
+        updatePayload.longitude = geoValues.lon
+        updatePayload.geofence_radius = geoValues.radius
+        updatePayload.has_kiosk = true
+      }
+
       const { error: updateError } = await supabase
         .from('sites')
-        .update({
-          name: editName.trim(),
-          address: editAddress.trim() || null,
-        })
+        .update(updatePayload)
         .eq('id', site.id)
 
       if (updateError) {
-        console.error('[v0] Error updating site:', updateError)
-        alert('Error updating site: ' + updateError.message)
+        if (updateError.code === '23505') {
+          setEditSiteCodeError('Site code already exists')
+        } else {
+          alert('Error updating site: ' + updateError.message)
+        }
         setSaving(false)
         return
       }
 
-      const normalizedSupervisor =
-        editSupervisor === 'unassigned' ? '' : editSupervisor
+      // Upsert geofence_config if geo provided
+      if (geoValues) {
+        const { data: { user } } = await supabase.auth.getUser()
+        await supabase.from('geofence_config').upsert(
+          {
+            site_id: site.id,
+            center_latitude: geoValues.lat,
+            center_longitude: geoValues.lon,
+            radius_meters: geoValues.radius,
+            configured_by_user_id: user?.id,
+            last_updated_at: new Date().toISOString(),
+            is_active: true,
+          },
+          { onConflict: 'site_id' }
+        )
+      }
 
-      if (normalizedSupervisor !== (supervisor?.id || '')) {
-        await supabase
-          .from('supervisor_sites')
-          .delete()
-          .eq('site_id', site.id)
-
-        if (normalizedSupervisor) {
-          await supabase
-            .from('supervisor_sites')
-            .insert({
-              supervisor_id: normalizedSupervisor,
-              site_id: site.id,
-            })
-        }
+      // Update supervisor assignment
+      const normalizedSupervisor = editSupervisor === 'unassigned' ? '' : editSupervisor
+      await supabase.from('supervisor_sites').delete().eq('site_id', site.id)
+      if (normalizedSupervisor) {
+        await supabase.from('supervisor_sites').insert({
+          supervisor_id: normalizedSupervisor,
+          site_id: site.id,
+        })
       }
 
       setIsEditModalOpen(false)
 
-      setSite(prev =>
-        prev
-          ? {
-            ...prev,
-            name: editName.trim(),
-            address: editAddress.trim() || null,
-          }
-          : prev
-      )
+      // If site code changed, redirect to new URL
+      if (editSiteCode.toUpperCase() !== site.site_code) {
+        router.push(`/manager/sites/${editSiteCode.toUpperCase()}`)
+        return
+      }
+
+      // Otherwise update local state
+      setSite(prev => prev ? {
+        ...prev,
+        site_code: editSiteCode.toUpperCase(),
+        name: editName.trim(),
+        address: editAddress.trim() || null,
+        latitude: geoValues?.lat ?? prev.latitude,
+        longitude: geoValues?.lon ?? prev.longitude,
+        geofence_radius: geoValues?.radius ?? prev.geofence_radius,
+      } : prev)
 
       if (editSupervisor === 'unassigned') {
         setSupervisor(null)
       } else {
         const selected = supervisorList.find(s => s.id === editSupervisor)
-        if (selected) {
-          setSupervisor(selected)
-        }
+        if (selected) setSupervisor(selected)
       }
     } catch (error) {
       console.error('[v0] Error saving site:', error)
@@ -515,14 +570,21 @@ export default function SiteDetailPage() {
           </DialogHeader>
           <div className="space-y-4 py-4">
             <div className="space-y-2">
-              <Label htmlFor="editSiteCode">Site Code</Label>
+              <Label htmlFor="editSiteCode">Site Code *</Label>
               <Input
                 id="editSiteCode"
-                value={site.site_code}
-                disabled
-                className="bg-slate-100"
+                type="text"
+                maxLength={7}
+                value={editSiteCode}
+                onChange={(e) => {
+                  setEditSiteCode(e.target.value.toUpperCase())
+                  setEditSiteCodeError('')
+                }}
+                placeholder="e.g. KLSNT01"
               />
-              <p className="text-xs text-slate-500">Site code cannot be changed</p>
+              {editSiteCodeError && (
+                <p className="text-xs text-red-600">{editSiteCodeError}</p>
+              )}
             </div>
 
             <div className="space-y-2">
@@ -536,10 +598,12 @@ export default function SiteDetailPage() {
 
             <div className="space-y-2">
               <Label htmlFor="editSiteAddress">Address</Label>
-              <Input
+              <textarea
                 id="editSiteAddress"
                 value={editAddress}
                 onChange={(e) => setEditAddress(e.target.value)}
+                rows={2}
+                className="w-full px-3 py-2 border border-slate-300 rounded-md text-sm"
               />
             </div>
 
@@ -558,6 +622,48 @@ export default function SiteDetailPage() {
                   ))}
                 </SelectContent>
               </Select>
+            </div>
+
+            <div className="space-y-2">
+              <Label>Geofence (optional)</Label>
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <Label htmlFor="editLat" className="text-xs text-slate-500">Latitude</Label>
+                  <Input
+                    id="editLat"
+                    type="number"
+                    step="any"
+                    value={editLatitude}
+                    onChange={(e) => setEditLatitude(e.target.value)}
+                    placeholder="e.g. 3.1478"
+                    className="text-sm"
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="editLon" className="text-xs text-slate-500">Longitude</Label>
+                  <Input
+                    id="editLon"
+                    type="number"
+                    step="any"
+                    value={editLongitude}
+                    onChange={(e) => setEditLongitude(e.target.value)}
+                    placeholder="e.g. 101.6953"
+                    className="text-sm"
+                  />
+                </div>
+              </div>
+              <div>
+                <Label htmlFor="editRadius" className="text-xs text-slate-500">Radius (metres, 10–500)</Label>
+                <Input
+                  id="editRadius"
+                  type="number"
+                  value={editRadius}
+                  onChange={(e) => setEditRadius(e.target.value)}
+                  min="10"
+                  max="500"
+                  className="text-sm"
+                />
+              </div>
             </div>
           </div>
 
