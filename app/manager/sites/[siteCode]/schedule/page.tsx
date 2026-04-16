@@ -6,7 +6,8 @@ import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
-import { LogOut, ChevronLeft, ChevronRight } from 'lucide-react'
+import { LogOut, ChevronLeft, ChevronRight, Check, AlertCircle, Loader2 } from 'lucide-react'
+import { toast } from 'sonner'
 import { supabase } from '@/lib/supabase/client'
 import { getLocalDateString } from '@/lib/utils'
 
@@ -92,15 +93,31 @@ function formatDisplayDate(date: Date): string {
   })
 }
 
-function combineDateAndTime(dateString: string, timeString: string): Date {
-  const normalizedTime = timeString.length === 5 ? `${timeString}:00` : timeString
-  return new Date(`${dateString}T${normalizedTime}`)
-}
-
 function formatTimeRange(startTime: string, endTime: string): string {
   const start = startTime.slice(0, 5)
   const end = endTime.slice(0, 5)
   return `${start}–${end}`
+}
+
+// Skeleton components
+function GuardListSkeleton() {
+  return (
+    <div className="space-y-2">
+      {[...Array(3)].map((_, i) => (
+        <div key={i} className="h-10 bg-slate-100 rounded animate-pulse" />
+      ))}
+    </div>
+  )
+}
+
+function AssignedGuardsSkeleton() {
+  return (
+    <div className="space-y-2">
+      {[...Array(2)].map((_, i) => (
+        <div key={i} className="h-12 bg-slate-100 rounded animate-pulse" />
+      ))}
+    </div>
+  )
 }
 
 export default function ManagerSchedulePage() {
@@ -379,7 +396,9 @@ export default function ManagerSchedulePage() {
 
         await Promise.all([fetchSchedule(siteRecord.id), fetchGuards()])
       } catch (err) {
-        setError(err instanceof Error ? err.message : 'Failed to load schedule')
+        const message = err instanceof Error ? err.message : 'Failed to load schedule'
+        setError(message)
+        toast.error(message)
       } finally {
         setLoading(false)
       }
@@ -392,7 +411,9 @@ export default function ManagerSchedulePage() {
     if (!siteUUID) return
 
     fetchSchedule(siteUUID).catch((err) => {
-      setError(err instanceof Error ? err.message : 'Failed to refresh schedule')
+      const message = err instanceof Error ? err.message : 'Failed to refresh schedule'
+      setError(message)
+      toast.error(message)
     })
   }, [fetchSchedule, siteUUID, weekStartDate])
 
@@ -531,7 +552,7 @@ export default function ManagerSchedulePage() {
     return shiftDef?.shift_name || null
   }
 
-  const parseTriggerError = (message: string): string => {
+  const parseErrorMessage = (message: string): string => {
     if (message.includes('Headcount exceeded')) return 'This slot is already full.'
     if (message.includes('Guard is on approved leave')) return 'This guard is on approved leave on that date.'
     if (message.includes('Invalid assignment')) return 'The assignment falls outside the slot time window.'
@@ -550,7 +571,7 @@ export default function ManagerSchedulePage() {
 
       const fullSlot = slotsRef.current.find((s) => s.id === selectedSlot.id)
       if (!fullSlot) {
-        alert('No valid roster slot exists for this cell.')
+        toast.error('No valid roster slot exists for this cell.')
         return
       }
 
@@ -567,7 +588,7 @@ export default function ManagerSchedulePage() {
       }
 
       if (existingAssignment) {
-        alert('This guard is already assigned to this slot.')
+        toast.error('This guard is already assigned to this slot.')
         setSelectedGuard(null)
         setSearchQuery('')
         return
@@ -594,8 +615,6 @@ export default function ManagerSchedulePage() {
         otherSlots = (otherSlotsData || []) as Slot[]
       }
 
-      // fullSlot.start_time and end_time are already full timestamptz from the database
-      // No need to combine with shift_date — use them directly
       const newStart = new Date(fullSlot.start_time)
       const newEnd = new Date(fullSlot.end_time)
       if (newEnd <= newStart) {
@@ -615,13 +634,12 @@ export default function ManagerSchedulePage() {
       })
 
       if (overlaps) {
-        alert('This guard is already assigned to another shift at this time.')
+        toast.error('This guard is already assigned to another shift at this time.')
         return
       }
 
       const formattedStart = fullSlot.start_time.replace('T', ' ').replace('+08:00', '+08')
       const formattedEnd = fullSlot.end_time.replace('T', ' ').replace('+08:00', '+08')
-
 
       const result = await supabase.from('shift_assignments').insert({
         roster_slot_id: fullSlot.id,
@@ -635,16 +653,21 @@ export default function ManagerSchedulePage() {
       })
 
       if (result.error) {
-        alert(parseTriggerError(result.error.message))
+        toast.error(parseErrorMessage(result.error.message))
         return
       }
+
+      toast.success(`${selectedGuard.full_name} assigned successfully!`, {
+        icon: <Check className="w-4 h-4" />,
+      })
 
       setSelectedGuard(null)
       setSearchQuery('')
       await fetchSchedule(siteUUID)
     } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to save assignment'
       console.error('[schedule] Error saving assignment:', err)
-      alert('Failed to save assignment')
+      toast.error(message)
     } finally {
       setSaving(false)
     }
@@ -652,16 +675,22 @@ export default function ManagerSchedulePage() {
 
   const cancelAssignment = async (assignmentId: string) => {
     try {
+      const assignment = assignments.find((a) => a.id === assignmentId)
+      const guardName = assignedGuardProfiles.find((g) => g.id === assignment?.guard_id)?.full_name
+
       const { error } = await supabase
         .from('shift_assignments')
         .update({ is_cancelled: true })
         .eq('id', assignmentId)
 
       if (error) throw error
+
+      toast.success(`${guardName} removed from shift`)
       if (siteUUID) await fetchSchedule(siteUUID)
     } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to cancel assignment'
       console.error('[schedule] Error cancelling assignment:', err)
-      alert('Failed to cancel assignment')
+      toast.error(message)
     }
   }
 
@@ -707,14 +736,23 @@ export default function ManagerSchedulePage() {
 
       <div className="p-8 flex gap-8">
         {loading && (
-          <div className="flex items-center justify-center p-8">
-            <p className="text-slate-600">Loading schedule...</p>
+          <div className="flex items-center justify-center w-full min-h-96">
+            <div className="text-center">
+              <Loader2 className="w-8 h-8 animate-spin text-teal-600 mx-auto mb-4" />
+              <p className="text-slate-600">Loading schedule...</p>
+            </div>
           </div>
         )}
 
         {error && (
-          <div className="flex items-center justify-center p-8">
-            <p className="text-red-600">Error: {error}</p>
+          <div className="w-full">
+            <div className="flex gap-3 p-4 bg-red-50 border border-red-200 rounded-lg">
+              <AlertCircle className="w-5 h-5 text-red-600 shrink-0 mt-0.5" />
+              <div>
+                <p className="font-medium text-red-900">Failed to load schedule</p>
+                <p className="text-sm text-red-700">{error}</p>
+              </div>
+            </div>
           </div>
         )}
 
@@ -770,7 +808,7 @@ export default function ManagerSchedulePage() {
                     return (
                       <div
                         key={idx}
-                        className={`p-3 rounded-lg border ${isToday ? 'bg-blue-50 border-blue-200' : 'bg-white border-slate-200'
+                        className={`p-3 rounded-lg border transition-colors ${isToday ? 'bg-blue-50 border-blue-200' : 'bg-white border-slate-200'
                           }`}
                       >
                         <div className="text-xs font-semibold text-slate-700 mb-2">{dayNames[idx]}</div>
@@ -781,7 +819,7 @@ export default function ManagerSchedulePage() {
                 </div>
               </div>
 
-              <Card className="border-slate-200 overflow-hidden">
+              <Card className="border-slate-200 overflow-hidden shadow-sm">
                 <div className="overflow-x-auto">
                   <table className="w-full">
                     <thead>
@@ -803,7 +841,7 @@ export default function ManagerSchedulePage() {
                     </thead>
                     <tbody>
                       {shiftDefs.map((shiftDef, shiftIdx) => (
-                        <tr key={shiftDef.id} className="border-b border-slate-200">
+                        <tr key={shiftDef.id} className="border-b border-slate-200 hover:bg-slate-50 transition-colors">
                           <td className="px-4 py-3 text-sm font-semibold text-slate-900">
                             <div>{shiftDef.shift_name}</div>
                             <div className="text-xs text-slate-600">{shiftDef.shift_code}</div>
@@ -826,7 +864,11 @@ export default function ManagerSchedulePage() {
                                   setSelectedSlotId(slot?.id || null)
                                   setSelectedGuard(null)
                                 }}
-                                className={`px-4 py-3 text-center cursor-pointer transition ${isSelected ? 'bg-teal-50 border-2 border-teal-300' : isToday ? 'bg-blue-50' : ''
+                                className={`px-4 py-3 text-center cursor-pointer transition-colors ${isSelected
+                                    ? 'bg-teal-50 border-2 border-teal-300'
+                                    : isToday
+                                      ? 'bg-blue-50'
+                                      : 'hover:bg-slate-50'
                                   }`}
                               >
                                 <div className="space-y-1">
@@ -838,7 +880,7 @@ export default function ManagerSchedulePage() {
                                     return (
                                       <div
                                         key={cellIdx}
-                                        className={`px-2 py-1 rounded text-xs font-medium ${getChipColor(
+                                        className={`px-2 py-1 rounded text-xs font-medium transition-transform hover:scale-105 ${getChipColor(
                                           cell.assignmentType,
                                           shiftCount
                                         )}`}
@@ -869,9 +911,8 @@ export default function ManagerSchedulePage() {
 
               <div>
                 <div className="mb-4 p-3 bg-amber-50 border border-amber-200 rounded text-xs text-amber-800">
-                  <strong>Shift Overload Warning:</strong> Guards highlighted in <strong>amber</strong>{' '}
-                  are assigned to 2 shifts today. Guards in <strong>red</strong> are assigned to 3+ shifts
-                  — please review.
+                  <strong>Shift Overload Warning:</strong> Guards highlighted in <strong>amber</strong> are assigned
+                  to 2 shifts today. Guards in <strong>red</strong> are assigned to 3+ shifts — please review.
                 </div>
 
                 <div className="flex flex-col gap-2 text-xs text-slate-600">
@@ -896,7 +937,7 @@ export default function ManagerSchedulePage() {
             </div>
 
             <div className="w-72 shrink-0">
-              <Card className="border-slate-200 p-6 sticky top-8">
+              <Card className="border-slate-200 p-6 sticky top-8 shadow-sm">
                 <h3 className="text-lg font-bold text-slate-900 mb-2">
                   {cellData.shift} — {cellData.date}
                 </h3>
@@ -906,9 +947,9 @@ export default function ManagerSchedulePage() {
                 </div>
 
                 <div className="mb-4">
-                  <div className="w-full bg-slate-200 rounded h-2">
+                  <div className="w-full bg-slate-200 rounded h-2 overflow-hidden">
                     <div
-                      className="bg-teal-600 h-2 rounded transition-all"
+                      className="bg-teal-600 h-2 rounded transition-all duration-300"
                       style={{
                         width: `${cellData.required > 0 ? (cellData.filled / cellData.required) * 100 : 0}%`,
                       }}
@@ -917,38 +958,46 @@ export default function ManagerSchedulePage() {
                 </div>
 
                 {!cellData.hasSlot && (
-                  <div className="mb-6 rounded border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-700">
-                    No roster slot exists for this shift/date.
+                  <div className="mb-6 rounded border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-700 flex gap-2">
+                    <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                    <span>No roster slot exists for this shift/date.</span>
                   </div>
                 )}
 
                 <div className="mb-6 pb-6 border-b border-slate-200">
                   <h4 className="text-sm font-semibold text-slate-900 mb-3">Assigned</h4>
                   <div className="space-y-2">
-                    {assignedGuards.map((cell, idx) => (
-                      <div key={idx} className="flex items-center justify-between bg-slate-50 p-3 rounded">
-                        <div>
-                          <div className="text-sm font-medium text-slate-900">{cell.guardName}</div>
-                          <Badge
-                            variant="secondary"
-                            className={`text-xs mt-1 ${cell.assignmentType === 'planned'
-                              ? 'bg-green-100 text-green-700'
-                              : 'bg-amber-100 text-amber-700'
-                              }`}
-                          >
-                            {cell.assignmentType}
-                          </Badge>
-                        </div>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => cancelAssignment(cell.assignmentId)}
-                          className="text-slate-600 hover:text-red-600"
+                    {assignedGuards.length === 0 ? (
+                      <p className="text-xs text-slate-500 py-2">No guards assigned yet</p>
+                    ) : (
+                      assignedGuards.map((cell, idx) => (
+                        <div
+                          key={idx}
+                          className="flex items-center justify-between bg-slate-50 p-3 rounded hover:bg-slate-100 transition-colors group"
                         >
-                          ✕
-                        </Button>
-                      </div>
-                    ))}
+                          <div>
+                            <div className="text-sm font-medium text-slate-900">{cell.guardName}</div>
+                            <Badge
+                              variant="secondary"
+                              className={`text-xs mt-1 ${cell.assignmentType === 'planned'
+                                  ? 'bg-green-100 text-green-700'
+                                  : 'bg-amber-100 text-amber-700'
+                                }`}
+                            >
+                              {cell.assignmentType}
+                            </Badge>
+                          </div>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => cancelAssignment(cell.assignmentId)}
+                            className="text-slate-400 hover:text-red-600 opacity-0 group-hover:opacity-100 transition-all"
+                          >
+                            ✕
+                          </Button>
+                        </div>
+                      ))
+                    )}
                   </div>
                 </div>
 
@@ -964,76 +1013,83 @@ export default function ManagerSchedulePage() {
                   />
 
                   <div className="space-y-2 mb-4 max-h-48 overflow-y-auto">
-                    {filteredGuards
-                      .filter((guard) => {
-                        const isAlreadyAssignedToThisSlot =
-                          selectedSlot &&
-                          assignments.some(
-                            (a) => a.guard_id === guard.id && a.roster_slot_id === selectedSlot.id
-                          )
-                        return !isAlreadyAssignedToThisSlot
-                      })
-                      .map((guard) => {
-                        const dateStr = selectedSlot
-                          ? getLocalDateString(new Date(selectedSlot.shift_date))
-                          : null
-
-                        const isOnLeave =
-                          !!dateStr &&
-                          guardLeave.some((leave) => guard.id === leave.user_id && leave.leave_date === dateStr)
-
-                        const assignmentOnOtherSlotToday =
-                          !!dateStr &&
-                          assignments.find((a) => {
-                            const slotDate = slotsRef.current.find((s) => s.id === a.roster_slot_id)?.shift_date
-                            const assignmentDateStr = slotDate
-                              ? getLocalDateString(new Date(slotDate))
-                              : null
-
-                            return (
-                              a.guard_id === guard.id &&
-                              assignmentDateStr === dateStr &&
-                              a.roster_slot_id !== selectedSlot?.id
+                    {guardsDirectory.length === 0 ? (
+                      <GuardListSkeleton />
+                    ) : filteredGuards.length === 0 ? (
+                      <p className="text-xs text-slate-500 py-4 text-center">No guards found</p>
+                    ) : (
+                      filteredGuards
+                        .filter((guard) => {
+                          const isAlreadyAssignedToThisSlot =
+                            selectedSlot &&
+                            assignments.some(
+                              (a) => a.guard_id === guard.id && a.roster_slot_id === selectedSlot.id
                             )
-                          })
+                          return !isAlreadyAssignedToThisSlot
+                        })
+                        .map((guard) => {
+                          const dateStr = selectedSlot
+                            ? getLocalDateString(new Date(selectedSlot.shift_date))
+                            : null
 
-                        const shiftNameForBadge = assignmentOnOtherSlotToday
-                          ? getShiftNameForAssignment(assignmentOnOtherSlotToday.id)
-                          : null
+                          const isOnLeave =
+                            !!dateStr &&
+                            guardLeave.some((leave) => guard.id === leave.user_id && leave.leave_date === dateStr)
 
-                        const isDisabled = isOnLeave
-                        const isSelected = selectedGuard?.id === guard.id
+                          const assignmentOnOtherSlotToday =
+                            !!dateStr &&
+                            assignments.find((a) => {
+                              const slotDate = slotsRef.current.find((s) => s.id === a.roster_slot_id)?.shift_date
+                              const assignmentDateStr = slotDate
+                                ? getLocalDateString(new Date(slotDate))
+                                : null
 
-                        return (
-                          <button
-                            key={guard.id}
-                            onClick={() => !isDisabled && setSelectedGuard(guard)}
-                            disabled={isDisabled}
-                            className={`w-full text-left px-3 py-2 rounded text-sm font-medium transition ${isDisabled
-                              ? 'bg-slate-100 text-slate-400 cursor-not-allowed'
-                              : isSelected
-                                ? 'bg-teal-50 text-teal-700 border-2 border-teal-300'
-                                : 'bg-slate-50 text-slate-700 hover:bg-slate-100 border border-slate-200'
-                              }`}
-                          >
-                            <div className="flex items-center justify-between gap-2">
-                              <span>{guard.full_name}</span>
-                              <div className="flex items-center gap-2">
-                                {shiftNameForBadge && !isDisabled && (
-                                  <Badge className="bg-teal-500 text-white text-xs">
-                                    Assigned: {shiftNameForBadge}
-                                  </Badge>
-                                )}
-                                {isOnLeave && <span className="text-xs text-red-600">(on leave)</span>}
+                              return (
+                                a.guard_id === guard.id &&
+                                assignmentDateStr === dateStr &&
+                                a.roster_slot_id !== selectedSlot?.id
+                              )
+                            })
+
+                          const shiftNameForBadge = assignmentOnOtherSlotToday
+                            ? getShiftNameForAssignment(assignmentOnOtherSlotToday.id)
+                            : null
+
+                          const isDisabled = isOnLeave
+                          const isSelected = selectedGuard?.id === guard.id
+
+                          return (
+                            <button
+                              key={guard.id}
+                              onClick={() => !isDisabled && setSelectedGuard(guard)}
+                              disabled={isDisabled}
+                              className={`w-full text-left px-3 py-2 rounded text-sm font-medium transition-all ${isDisabled
+                                  ? 'bg-slate-100 text-slate-400 cursor-not-allowed'
+                                  : isSelected
+                                    ? 'bg-teal-50 text-teal-700 border-2 border-teal-300 shadow-sm'
+                                    : 'bg-slate-50 text-slate-700 hover:bg-slate-100 border border-slate-200'
+                                }`}
+                            >
+                              <div className="flex items-center justify-between gap-2">
+                                <span>{guard.full_name}</span>
+                                <div className="flex items-center gap-2">
+                                  {shiftNameForBadge && !isDisabled && (
+                                    <Badge className="bg-teal-500 text-white text-xs">
+                                      Assigned: {shiftNameForBadge}
+                                    </Badge>
+                                  )}
+                                  {isOnLeave && <span className="text-xs text-red-600">(on leave)</span>}
+                                </div>
                               </div>
-                            </div>
-                          </button>
-                        )
-                      })}
+                            </button>
+                          )
+                        })
+                    )}
                   </div>
 
                   {saving ? (
                     <Button disabled className="w-full bg-slate-400" size="sm">
+                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
                       Saving...
                     </Button>
                   ) : !cellData.hasSlot ? (
