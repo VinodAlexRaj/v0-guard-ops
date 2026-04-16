@@ -756,7 +756,7 @@ export default function SchedulePage() {
               </div>
 
               <div className="flex gap-2 mb-6">
-                <div className="w-32 flex-shrink-0"></div>
+                <div className="w-32 shrink-0"></div>
                 <div className="grid grid-cols-7 gap-2 flex-1">
                   {days.map((day, idx) => {
                     const isToday = getLocalDateString(day) === getLocalDateString(new Date())
@@ -889,7 +889,7 @@ export default function SchedulePage() {
               </div>
             </div>
 
-            <div className="w-72 flex-shrink-0">
+            <div className="w-72 shrink-0">
               <Card className="border-slate-200 p-6 sticky top-8">
                 <h3 className="text-lg font-bold text-slate-900 mb-2">
                   {cellData.shift} — {cellData.date}
@@ -926,8 +926,8 @@ export default function SchedulePage() {
                           <Badge
                             variant="secondary"
                             className={`text-xs mt-1 ${cell.assignmentType === 'planned'
-                                ? 'bg-green-100 text-green-700'
-                                : 'bg-amber-100 text-amber-700'
+                              ? 'bg-green-100 text-green-700'
+                              : 'bg-amber-100 text-amber-700'
                               }`}
                           >
                             {cell.assignmentType}
@@ -1004,10 +1004,10 @@ export default function SchedulePage() {
                             onClick={() => !isDisabled && setSelectedGuard(guard)}
                             disabled={isDisabled}
                             className={`w-full text-left px-3 py-2 rounded text-sm font-medium transition ${isDisabled
-                                ? 'bg-slate-100 text-slate-400 cursor-not-allowed'
-                                : isSelected
-                                  ? 'bg-teal-50 text-teal-700 border-2 border-teal-300'
-                                  : 'bg-slate-50 text-slate-700 hover:bg-slate-100 border border-slate-200'
+                              ? 'bg-slate-100 text-slate-400 cursor-not-allowed'
+                              : isSelected
+                                ? 'bg-teal-50 text-teal-700 border-2 border-teal-300'
+                                : 'bg-slate-50 text-slate-700 hover:bg-slate-100 border border-slate-200'
                               }`}
                           >
                             <div className="flex items-center justify-between gap-2">
