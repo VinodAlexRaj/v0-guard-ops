@@ -65,13 +65,6 @@ export default function ManagerSitesPage() {
   const [supervisorList, setSupervisorList] = useState<{ id: string; name: string }[]>([])
   const [saving, setSaving] = useState(false)
 
-  const [showAddSite, setShowAddSite] = useState(false)
-  const [newSiteCode, setNewSiteCode] = useState('')
-  const [newSiteName, setNewSiteName] = useState('')
-  const [newSiteAddress, setNewSiteAddress] = useState('')
-  const [addSiteLoading, setAddSiteLoading] = useState(false)
-  const [addSiteError, setAddSiteError] = useState('')
-
   const [supervisorUsers, setSupervisorUsers] = useState<SupervisorUser[]>([])
   const [showAssignSupervisor, setShowAssignSupervisor] = useState(false)
   const [assigningSite, setAssigningSite] = useState<SiteRow | null>(null)
