@@ -24,6 +24,7 @@ interface ShiftDefinition {
   id: string
   shift_name: string
   shift_code: string
+  start_time?: string
   required_headcount: number
   site_id: string
 }
@@ -43,6 +44,29 @@ interface Guard {
   external_role: string
 }
 
+interface LeaveRecord {
+  id: string
+  user_id: string
+  leave_date: string
+  leave_status: string
+}
+
+interface RosterCell {
+  guardName: string
+  assignmentType: string
+  assignmentId: string
+}
+
+interface SelectedCellData {
+  shift: string
+  time: string
+  date: string
+  filled: number
+  required: number
+  dayIndex: number
+  shiftIndex: number
+}
+
 export default function SchedulePage() {
   const router = useRouter()
   const params = useParams()
@@ -59,10 +83,8 @@ export default function SchedulePage() {
   }
 
   // State for transformed data
-  const [viewMode, setViewMode] = useState<'week' | 'day'>('week')
   const [weekStartDate, setWeekStartDate] = useState<Date>(() => getWeekStart(new Date()))
-  const [dayViewDate, setDayViewDate] = useState<Date>(new Date())
-  const [selectedCell, setSelectedCell] = useState({ shiftIndex: 1, dayIndex: 2 })
+  const [selectedCell, setSelectedCell] = useState({ shiftIndex: 0, dayIndex: 0 })
   const [selectedSlot, setSelectedSlot] = useState<Slot | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
   const [selectedGuard, setSelectedGuard] = useState<Guard | null>(null)
@@ -75,7 +97,7 @@ export default function SchedulePage() {
   const [guardsDirectory, setGuardsDirectory] = useState<Guard[]>([])
   const [siteUUID, setSiteUUID] = useState<string | null>(null)
   const [guardShiftCounts, setGuardShiftCounts] = useState<Map<string, Map<string, number>>>(new Map())
-  const [guardLeave, setGuardLeave] = useState<any[]>([])
+  const [guardLeave, setGuardLeave] = useState<LeaveRecord[]>([])
   const [supervisorName, setSupervisorName] = useState('Supervisor')
   const [currentDateStr, setCurrentDateStr] = useState('')
 
@@ -111,7 +133,7 @@ export default function SchedulePage() {
     const initializeData = async () => {
       try {
         setLoading(true)
-        
+
         // Set current date string
         const dateStr = today.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: '2-digit', year: 'numeric' })
         setCurrentDateStr(dateStr)
@@ -154,12 +176,24 @@ export default function SchedulePage() {
     initializeData()
   }, [])
 
-  // Refetch schedule when week changes
+  // Refetch schedule when week changes and reset stale selected slot
   useEffect(() => {
     if (siteUUID) {
       fetchSchedule(siteUUID)
     }
   }, [weekStartDate, siteUUID])
+
+  // Reset selected slot if it becomes stale
+  useEffect(() => {
+    if (selectedSlot && !slots.find(s => s.id === selectedSlot.id)) {
+      // Selected slot no longer exists after data refresh
+      const firstSlot = slots[0] || null
+      setSelectedSlot(firstSlot)
+      if (firstSlot) {
+        setSelectedCell({ shiftIndex: shiftDefs.findIndex(s => s.id === firstSlot.shift_definition_id), dayIndex: 0 })
+      }
+    }
+  }, [slots, shiftDefs])
 
   async function fetchSchedule(actualSiteUUID: string) {
     try {
@@ -176,19 +210,21 @@ export default function SchedulePage() {
 
       if (slotsError) throw slotsError
 
-      // Query 2 — get shift definitions for this site
+      // Query 2 — get shift definitions for this site (ordered by start_time, then shift_code)
       const { data: shiftDefsData, error: shiftDefsError } = await supabase
         .from('shift_definitions')
-        .select('id, shift_name, shift_code, required_headcount, site_id')
+        .select('id, shift_name, shift_code, start_time, required_headcount, site_id')
         .eq('site_id', actualSiteUUID)
         .eq('is_active', true)
+        .order('start_time', { ascending: true, nullsFirst: false })
+        .order('shift_code', { ascending: true })
 
       if (shiftDefsError) throw shiftDefsError
 
       // Query 3 — get assignments for these slots (skip if no slots)
       const slotIds = (slotsData || []).map(s => s.id)
       let assignmentsData: Assignment[] = []
-      
+
       if (slotIds.length > 0) {
         const { data, error: assignmentsError } = await supabase
           .from('shift_assignments')
@@ -223,7 +259,7 @@ export default function SchedulePage() {
       setShiftDefs(shiftDefsData || [])
       setAssignments(assignmentsData || [])
       setGuardNames(guardsData || [])
-      setGuardLeave(leaveData || [])
+      setGuardLeave((leaveData || []) as LeaveRecord[])
 
       // Calculate guard shift counts per day
       calculateGuardShiftCounts(assignmentsData || [], slotsData || [])
@@ -321,7 +357,7 @@ export default function SchedulePage() {
         return
       }
 
-      // Check for overlapping assignments
+      // Check for overlapping assignments on the same date
       const { data: overlappingAssignments } = await supabase
         .from('shift_assignments')
         .select('id, roster_slot_id')
@@ -385,12 +421,21 @@ export default function SchedulePage() {
     }
   }
 
+  // Get slot for a specific shift and day (FIXED: now matches both day and shift_definition_id)
   function getSlotForCell(shiftIndex: number, dayIndex: number): Slot | null {
-    const dayStr = getLocalDateString(days[dayIndex])
+    if (shiftIndex < 0 || shiftIndex >= shiftDefs.length || dayIndex < 0 || dayIndex >= 7) {
+      return null
+    }
+
+    const shiftDef = shiftDefs[shiftIndex]
+    const dayDate = days[dayIndex]
+    const dayStr = getLocalDateString(dayDate)
+
     const slot = slotsRef.current.find(s => {
       const slotDate = getLocalDateString(new Date(s.shift_date))
-      return slotDate === dayStr
+      return slotDate === dayStr && s.shift_definition_id === shiftDef.id
     })
+
     return slot || null
   }
 
@@ -405,11 +450,9 @@ export default function SchedulePage() {
 
   // Memoized roster grid computation
   const rosterGrid = useMemo(() => {
-    const grid: any[][][] = [
-      Array(7).fill(null).map(() => []),
-      Array(7).fill(null).map(() => []),
-      Array(7).fill(null).map(() => []),
-    ]
+    const grid: RosterCell[][][] = Array.from({ length: shiftDefs.length }, () =>
+      Array.from({ length: 7 }, () => [])
+    )
 
     const slotMap = new Map(slots.map(s => [s.id, s]))
     const shiftDefMap = new Map(shiftDefs.map(s => [s.id, s]))
@@ -431,34 +474,23 @@ export default function SchedulePage() {
       const shiftIndex = shiftDefs.findIndex(s => s.id === slot.shift_definition_id)
 
       if (shiftIndex >= 0 && dayIndex >= 0 && dayIndex < 7) {
-        grid[shiftIndex][dayIndex].push([
-          guard.full_name,
-          assignment.assignment_type.toLowerCase(),
-          assignment.id,
-        ])
+        grid[shiftIndex][dayIndex].push({
+          guardName: guard.full_name,
+          assignmentType: assignment.assignment_type.toLowerCase(),
+          assignmentId: assignment.id,
+        })
       }
     })
 
     return grid
   }, [slots, shiftDefs, assignments, guardNames])
 
-  function getRosterCell(shiftIndex: number, dayIndex: number) {
+  function getRosterCell(shiftIndex: number, dayIndex: number): RosterCell[] {
     return rosterGrid?.[shiftIndex]?.[dayIndex] || []
   }
 
-  function getAssignedCount(shiftIndex: number, dayIndex: number) {
-    return getRosterCell(shiftIndex, dayIndex).filter(cell => cell !== null && cell !== undefined).length
-  }
-
-  function getRequiredHeadcount(shiftIndex: number): number {
-    const slot = getSlotForCell(shiftIndex, 0)
-    if (slot) {
-      const shiftDef = shiftDefs.find(sd => sd.id === slot.shift_definition_id)
-      if (shiftDef?.required_headcount) {
-        return shiftDef.required_headcount
-      }
-    }
-    return 2
+  function getAssignedCount(shiftIndex: number, dayIndex: number): number {
+    return getRosterCell(shiftIndex, dayIndex).length
   }
 
   function getRequiredHeadcountForSlot(slotId: string): number {
@@ -494,17 +526,17 @@ export default function SchedulePage() {
 
   const realCoverageData = assignments.length > 0 ? calculateCoverage() : [100, 100, 100, 100, 100, 100, 100]
 
-  function getSelectedCellData() {
+  function getSelectedCellData(): SelectedCellData {
     const shiftIndex = selectedCell.shiftIndex
     const dayIndex = selectedCell.dayIndex
-    const required = selectedSlot ? getRequiredHeadcountForSlot(selectedSlot.id) : 2
-    const filled = selectedSlot
-      ? assignments.filter(a => a.roster_slot_id === selectedSlot.id).length
+    const slot = getSlotForCell(shiftIndex, dayIndex)
+    const required = slot ? getRequiredHeadcountForSlot(slot.id) : 2
+    const filled = slot
+      ? assignments.filter(a => a.roster_slot_id === slot.id).length
       : getAssignedCount(shiftIndex, dayIndex)
     const date = days[dayIndex]
     const dateStr = date.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: '2-digit' })
-    
-    const slot = getSlotForCell(shiftIndex, dayIndex)
+
     const shiftDef = slot ? shiftDefs.find(sd => sd.id === slot.shift_definition_id) : null
 
     return {
@@ -522,13 +554,13 @@ export default function SchedulePage() {
     g.full_name.toLowerCase().includes(searchQuery.toLowerCase())
   )
 
-  function getCoverageColor(percentage: number) {
+  function getCoverageColor(percentage: number): string {
     if (percentage >= 80) return 'text-green-600'
     if (percentage >= 50) return 'text-amber-600'
     return 'text-red-600'
   }
 
-  function getChipColor(status: string | null, shiftCount: number = 1) {
+  function getChipColor(status: string | null, shiftCount: number = 1): string {
     if (status) {
       if (shiftCount >= 3) return 'bg-red-100 text-red-700 border-0 font-semibold'
       if (shiftCount === 2) return 'bg-amber-100 text-amber-700 border-0 font-semibold'
@@ -599,35 +631,33 @@ export default function SchedulePage() {
               {/* Week / Day Navigation */}
               <div className="flex items-center justify-between mb-6">
                 <div className="flex items-center gap-3">
-                  <>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="text-slate-600"
-                      onClick={() => {
-                        const prev = new Date(weekStart)
-                        prev.setDate(prev.getDate() - 7)
-                        setWeekStartDate(prev)
-                      }}
-                    >
-                      <ChevronLeft className="w-5 h-5" />
-                    </Button>
-                    <span className="text-sm font-medium text-slate-900">
-                      {weekStart.getDate()} – {weekEnd.getDate()} {weekStart.toLocaleDateString('en-US', { month: 'short', year: 'numeric' })}
-                    </span>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="text-slate-600"
-                      onClick={() => {
-                        const next = new Date(weekStart)
-                        next.setDate(next.getDate() + 7)
-                        setWeekStartDate(next)
-                      }}
-                    >
-                      <ChevronRight className="w-5 h-5" />
-                    </Button>
-                  </>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="text-slate-600"
+                    onClick={() => {
+                      const prev = new Date(weekStart)
+                      prev.setDate(prev.getDate() - 7)
+                      setWeekStartDate(prev)
+                    }}
+                  >
+                    <ChevronLeft className="w-5 h-5" />
+                  </Button>
+                  <span className="text-sm font-medium text-slate-900">
+                    {weekStart.getDate()} – {weekEnd.getDate()} {weekStart.toLocaleDateString('en-US', { month: 'short', year: 'numeric' })}
+                  </span>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="text-slate-600"
+                    onClick={() => {
+                      const next = new Date(weekStart)
+                      next.setDate(next.getDate() + 7)
+                      setWeekStartDate(next)
+                    }}
+                  >
+                    <ChevronRight className="w-5 h-5" />
+                  </Button>
                 </div>
               </div>
 
@@ -682,11 +712,7 @@ export default function SchedulePage() {
                           </td>
                           {days.map((day, dayIdx) => {
                             const isToday = day.getTime() === today.getTime()
-                            const dayStr = getLocalDateString(day)
-                            const slot = slotsRef.current.find(s => {
-                              const slotDate = getLocalDateString(new Date(s.shift_date))
-                              return slotDate === dayStr && s.shift_definition_id === shiftDef.id
-                            })
+                            const slot = getSlotForCell(shiftIdx, dayIdx)
                             const isSelected = selectedSlot?.id === slot?.id
                             const cells = getRosterCell(shiftIdx, dayIdx)
                             const required = slot ? getRequiredHeadcountForSlot(slot.id) : shiftDef.required_headcount
@@ -708,11 +734,10 @@ export default function SchedulePage() {
                                   {cells.map((cell, cellIdx) => {
                                     const dateStr = getLocalDateString(day)
                                     const guardMap = guardShiftCounts.get(dateStr) || new Map()
-                                    const guardId = cell[2] ? assignments.find(a => a.id === cell[2])?.guard_id : null
-                                    const shiftCount = guardId ? (guardMap.get(guardId) || 1) : 1
+                                    const shiftCount = guardMap.get(cell.assignmentId ? assignments.find(a => a.id === cell.assignmentId)?.guard_id : '') || 1
                                     return (
-                                      <div key={cellIdx} className={`px-2 py-1 rounded text-xs font-medium ${getChipColor(cell[1], shiftCount)}`}>
-                                        {cell[0]}
+                                      <div key={cellIdx} className={`px-2 py-1 rounded text-xs font-medium ${getChipColor(cell.assignmentType, shiftCount)}`}>
+                                        {cell.guardName}
                                       </div>
                                     )
                                   })}
@@ -788,32 +813,29 @@ export default function SchedulePage() {
                       <div className="mb-6 pb-6 border-b border-slate-200">
                         <h4 className="text-sm font-semibold text-slate-900 mb-3">Assigned</h4>
                         <div className="space-y-2">
-                          {assignedGuards.map(
-                            (cell, idx) =>
-                              cell && (
-                                <div key={idx} className="flex items-center justify-between bg-slate-50 p-3 rounded">
-                                  <div>
-                                    <div className="text-sm font-medium text-slate-900">{cell[0]}</div>
-                                    <Badge
-                                      variant="secondary"
-                                      className={`text-xs mt-1 ${
-                                        cell[1] === 'planned' ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'
-                                      }`}
-                                    >
-                                      {cell[1]}
-                                    </Badge>
-                                  </div>
-                                  <Button
-                                    variant="ghost"
-                                    size="sm"
-                                    onClick={() => cancelAssignment(cell[2])}
-                                    className="text-slate-600 hover:text-red-600"
-                                  >
-                                    ✕
-                                  </Button>
-                                </div>
-                              )
-                          )}
+                          {assignedGuards.map((cell, idx) => (
+                            <div key={idx} className="flex items-center justify-between bg-slate-50 p-3 rounded">
+                              <div>
+                                <div className="text-sm font-medium text-slate-900">{cell.guardName}</div>
+                                <Badge
+                                  variant="secondary"
+                                  className={`text-xs mt-1 ${
+                                    cell.assignmentType === 'planned' ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'
+                                  }`}
+                                >
+                                  {cell.assignmentType}
+                                </Badge>
+                              </div>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => cancelAssignment(cell.assignmentId)}
+                                className="text-slate-600 hover:text-red-600"
+                              >
+                                ✕
+                              </Button>
+                            </div>
+                          ))}
                         </div>
                       </div>
 
