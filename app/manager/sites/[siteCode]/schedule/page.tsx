@@ -272,10 +272,7 @@ export default function ManagerSchedulePage() {
     async (actualSiteUUID: string) => {
       const startDate = getLocalDateString(weekStartDate)
       const endDate = getLocalDateString(weekEnd)
-      console.log('Week start:', getLocalDateString(weekStartDate))
-      console.log('Week end:', getLocalDateString(weekEnd))
-      console.log('Start date for query:', startDate)
-      console.log('End date for query:', endDate)
+
       const { data: slotsData, error: slotsError } = await supabase
         .from('roster_slots')
         .select('id, shift_date, start_time, end_time, shift_definition_id, site_id')
@@ -284,14 +281,6 @@ export default function ManagerSchedulePage() {
         .lte('shift_date', endDate)
 
       if (slotsError) throw slotsError
-
-      console.log('  slotsData returned:', slotsData?.length, 'slots')
-      if (slotsData && slotsData.length > 0) {
-        console.log('  Slots by date:')
-        slotsData.forEach(slot => {
-          console.log(`    ${slot.shift_date}: ${slot.id} (${slot.start_time} to ${slot.end_time})`)
-        })
-      }
 
       const { data: shiftDefsData, error: shiftDefsError } = await supabase
         .from('shift_definitions')
@@ -633,9 +622,6 @@ export default function ManagerSchedulePage() {
       const formattedStart = fullSlot.start_time.replace('T', ' ').replace('+08:00', '+08')
       const formattedEnd = fullSlot.end_time.replace('T', ' ').replace('+08:00', '+08')
 
-      console.log('Formatted for insert:')
-      console.log('  start_time:', formattedStart)
-      console.log('  end_time:', formattedEnd)
 
       const result = await supabase.from('shift_assignments').insert({
         roster_slot_id: fullSlot.id,
