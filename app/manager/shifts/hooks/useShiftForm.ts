@@ -20,7 +20,17 @@ export type ShiftFormValues = {
 
 export function useShiftForm() {
   const [formValues, setFormValues] = useState<ShiftFormValues>({
-    ...(EMPTY_FORM as ShiftFormValues),
+    shift_name: EMPTY_FORM.shift_name,
+    shift_code: EMPTY_FORM.shift_code,
+    start_time: EMPTY_FORM.start_time,
+    end_time: EMPTY_FORM.end_time,
+    required_headcount: EMPTY_FORM.required_headcount,
+    start_date: EMPTY_FORM.start_date,
+    end_date: EMPTY_FORM.end_date,
+    days_of_week: [...EMPTY_FORM.days_of_week],
+    is_chargeable: EMPTY_FORM.is_chargeable,
+    type: EMPTY_FORM.type,
+    is_active: EMPTY_FORM.is_active,
   })
   const [saving, setSaving] = useState(false)
 
@@ -148,7 +158,7 @@ export function useShiftForm() {
 
     const { data: slotRows, error: slotError } = await supabase
       .from('roster_slots')
-      .select('id')
+      .select('id, shift_date')
       .eq('shift_definition_id', editingShift.id)
 
     if (slotError) {
@@ -164,9 +174,9 @@ export function useShiftForm() {
       return { ok: true }
     }
 
-    const { count, error: assignmentError } = await supabase
+    const { data: assignmentRows, error: assignmentError } = await supabase
       .from('shift_assignments')
-      .select('id', { count: 'exact', head: true })
+      .select('id, roster_slot_id')
       .in('roster_slot_id', slotIds)
       .eq('is_cancelled', false)
 
@@ -177,11 +187,20 @@ export function useShiftForm() {
       }
     }
 
-    if ((count || 0) > 0) {
+    if ((assignmentRows || []).length === 0) {
+      return { ok: true }
+    }
+
+    // Check if any assignments are AFTER the new end_date
+    const assignmentsAfterNewEndDate = assignmentRows?.filter((assignment) => {
+      const slotRow = slotRows?.find((slot) => slot.id === assignment.roster_slot_id)
+      return slotRow && slotRow.shift_date > formValues.end_date
+    })
+
+    if ((assignmentsAfterNewEndDate || []).length > 0) {
       return {
         ok: false,
-        message:
-          'This change is blocked because active assigned roster slots exist for this shift. Remove those assignments first.',
+        message: `This change is blocked because ${assignmentsAfterNewEndDate?.length} assignment(s) exist after the new end date (${formValues.end_date}). Remove those assignments first.`,
       }
     }
 

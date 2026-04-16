@@ -30,7 +30,7 @@ export const EMPTY_FORM = {
   is_chargeable: true,
   type: 'contract',
   is_active: true,
-} as const
+}
 
 export const TYPE_BADGE_COLORS: Record<string, string> = {
   contract: 'bg-green-100 text-green-700 border-0',
