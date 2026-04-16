@@ -46,7 +46,7 @@ interface EditModalState {
     longitude: string
     radius: string
   }
-  errors: Record<string, string>
+  errors: Record<string, string | undefined>
   supervisorList: { id: string; name: string }[]
   saving: boolean
 }
