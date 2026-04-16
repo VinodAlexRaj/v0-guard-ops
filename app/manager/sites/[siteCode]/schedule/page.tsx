@@ -639,12 +639,6 @@ export default function ManagerSchedulePage() {
       console.log('  end_time (raw):', fullSlot.end_time)
       console.log('  end_time (type):', typeof fullSlot.end_time)
 
-      const startTimeISO = new Date(fullSlot.start_time).toISOString()
-      const endTimeISO = new Date(fullSlot.end_time).toISOString()
-
-      console.log('After conversion:')
-      console.log('  start_time (ISO):', startTimeISO)
-      console.log('  end_time (ISO):', endTimeISO)
 
       const result = await supabase.from('shift_assignments').insert({
         roster_slot_id: fullSlot.id,
