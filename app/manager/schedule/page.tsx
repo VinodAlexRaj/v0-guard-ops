@@ -194,16 +194,30 @@ export default function ManagerSchedulerPage() {
 
   /* ── Guards directory ────────── */
   const fetchGuards = useCallback(async () => {
+    // Fetch role_mapping to get manager/supervisor roles so we can EXCLUDE them
     const { data: roleMappings } = await supabase
-      .from('role_mapping').select('external_role').eq('internal_role', 'guard')
-    const guardRoles = [...new Set((roleMappings || []).map((r: any) => r.external_role).filter(Boolean))]
-    const rolesToUse = guardRoles.length > 0 ? guardRoles : ['SECURITY OFFICER', 'NEPALESE SECURITY OFFICER']
-    const { data: guards } = await supabase
+      .from('role_mapping')
+      .select('external_role, internal_role')
+
+    const nonGuardRoles = [...new Set(
+      (roleMappings || [])
+        .filter((r: any) => r.internal_role !== 'guard' && r.external_role)
+        .map((r: any) => r.external_role as string)
+    )]
+
+    // Fetch all active users — if we have non-guard roles, exclude them; otherwise fetch all
+    let query = supabase
       .from('users')
       .select('id, full_name, external_employee_code, external_role')
       .eq('is_active', true)
-      .in('external_role', rolesToUse)
       .order('full_name')
+
+    // Exclude known manager/supervisor/admin roles if available
+    if (nonGuardRoles.length > 0) {
+      query = query.not('external_role', 'in', `(${nonGuardRoles.map(r => `"${r}"`).join(',')})`)
+    }
+
+    const { data: guards } = await query
     setGuardsDirectory((guards || []) as Guard[])
   }, [])
 
