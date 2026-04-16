@@ -1,4 +1,5 @@
 export interface SiteFormErrors {
+  [key: string]: string | undefined
   siteCode?: string
   name?: string
   latitude?: string
