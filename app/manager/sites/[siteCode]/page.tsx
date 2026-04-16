@@ -22,9 +22,10 @@ import {
   DialogTitle,
   DialogFooter,
 } from '@/components/ui/dialog'
-import { LogOut, ArrowLeft, Edit2, Trash2, Users, Calendar, MapPin } from 'lucide-react'
+import { LogOut, ArrowLeft, Edit2, Users, Calendar, MapPin, AlertTriangle, PowerOff } from 'lucide-react'
 import { supabase } from '@/lib/supabase/client'
 import { getLocalDateString } from '@/lib/utils'
+import { toast } from 'sonner'
 
 interface SiteData {
   id: string
@@ -34,6 +35,13 @@ interface SiteData {
   latitude: number | null
   longitude: number | null
   geofence_radius: number | null
+  is_active: boolean
+}
+
+interface DeactivationBlocker {
+  futureShiftCount: number
+  assignedGuardCount: number
+  activeShiftDefCount: number
 }
 
 interface ShiftDefinition {
@@ -71,8 +79,9 @@ export default function SiteDetailPage() {
   const [supervisorList, setSupervisorList] = useState<{ id: string; name: string }[]>([])
   const [saving, setSaving] = useState(false)
 
-  const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false)
-  const [deleting, setDeleting] = useState(false)
+  const [isDeactivateModalOpen, setIsDeactivateModalOpen] = useState(false)
+  const [deactivationBlocker, setDeactivationBlocker] = useState<DeactivationBlocker | null>(null)
+  const [deactivating, setDeactivating] = useState(false)
 
   const handleSignOut = () => {
     router.push('/')
@@ -110,7 +119,7 @@ export default function SiteDetailPage() {
 
         const { data: siteData, error: siteError } = await supabase
           .from('sites')
-          .select('id, site_code, name, address, latitude, longitude, geofence_radius')
+          .select('id, site_code, name, address, latitude, longitude, geofence_radius, is_active')
           .eq('site_code', siteCode)
           .single()
 
@@ -326,34 +335,106 @@ export default function SiteDetailPage() {
     }
   }
 
-  const handleDeleteSite = async () => {
+  const handleToggleSiteStatus = async () => {
     if (!site) return
 
-    setDeleting(true)
+    // Reactivation — no checks needed
+    if (!site.is_active) {
+      if (!confirm(`Reactivate ${site.site_code}?`)) return
+      try {
+        const { error } = await supabase.from('sites').update({ is_active: true }).eq('id', site.id)
+        if (error) throw error
+        setSite(prev => prev ? { ...prev, is_active: true } : prev)
+        toast.success('Site reactivated')
+      } catch (err) {
+        console.error('[v0] Error reactivating site:', err)
+        toast.error('Failed to reactivate site')
+      }
+      return
+    }
+
+    // Deactivation — check for blockers
     try {
-      await supabase
-        .from('supervisor_sites')
-        .delete()
-        .eq('site_id', site.id)
+      const today = getLocalDateString()
 
-      const { error } = await supabase
-        .from('sites')
-        .delete()
-        .eq('id', site.id)
+      const { data: futureSlotsData } = await supabase
+        .from('roster_slots').select('id').eq('site_id', site.id).gte('shift_date', today)
 
-      if (error) {
-        console.error('[v0] Error deleting site:', error)
-        alert('Error deleting site: ' + error.message)
-        setDeleting(false)
+      const futureSlotIds = futureSlotsData?.map(s => s.id) || []
+      const futureShiftCount = futureSlotIds.length
+      let assignedGuardCount = 0
+
+      if (futureSlotIds.length > 0) {
+        const { data: assignmentsData } = await supabase
+          .from('shift_assignments').select('id, guard_id')
+          .in('roster_slot_id', futureSlotIds).eq('is_cancelled', false)
+        assignedGuardCount = new Set(assignmentsData?.map(a => a.guard_id) || []).size
+      }
+
+      const { data: activeShiftDefs } = await supabase
+        .from('shift_definitions').select('id').eq('site_id', site.id).eq('is_active', true)
+      const activeShiftDefCount = activeShiftDefs?.length || 0
+
+      // No blockers — simple confirm
+      if (futureShiftCount === 0 && activeShiftDefCount === 0) {
+        if (!confirm(`Deactivate ${site.site_code}? This will hide it from supervisors.`)) return
+        await performDeactivation()
         return
       }
 
-      router.push('/manager/sites')
-    } catch (error) {
-      console.error('[v0] Error deleting site:', error)
-      alert('Error deleting site')
+      // Blockers exist — show modal
+      setDeactivationBlocker({ futureShiftCount, assignedGuardCount, activeShiftDefCount })
+      setIsDeactivateModalOpen(true)
+    } catch (err) {
+      console.error('[v0] Error checking deactivation:', err)
+      toast.error('Failed to check site status')
+    }
+  }
+
+  const performDeactivation = async () => {
+    if (!site) return
+    try {
+      const { error } = await supabase.from('sites').update({ is_active: false }).eq('id', site.id)
+      if (error) throw error
+      setSite(prev => prev ? { ...prev, is_active: false } : prev)
+      toast.success('Site deactivated')
+    } catch (err) {
+      console.error('[v0] Error deactivating site:', err)
+      toast.error('Failed to deactivate site')
+    }
+  }
+
+  const handleForceDeactivate = async () => {
+    if (!deactivationBlocker || !site) return
+    setDeactivating(true)
+    try {
+      const today = getLocalDateString()
+
+      // Step 1 — Cancel all future shift assignments
+      const { data: futureSlots } = await supabase
+        .from('roster_slots').select('id').eq('site_id', site.id).gte('shift_date', today)
+
+      if (futureSlots && futureSlots.length > 0) {
+        const slotIds = futureSlots.map(s => s.id)
+        await supabase.from('shift_assignments')
+          .update({ is_cancelled: true }).in('roster_slot_id', slotIds).eq('is_cancelled', false)
+      }
+
+      // Step 2 — Deactivate all shift definitions
+      await supabase.from('shift_definitions')
+        .update({ is_active: false }).eq('site_id', site.id).eq('is_active', true)
+
+      // Step 3 — Deactivate the site
+      await performDeactivation()
+
+      setIsDeactivateModalOpen(false)
+      setDeactivationBlocker(null)
+      toast.success('Site deactivated — all future shifts cancelled and shift definitions deactivated')
+    } catch (err) {
+      console.error('[v0] Error force deactivating site:', err)
+      toast.error('Failed to deactivate site')
     } finally {
-      setDeleting(false)
+      setDeactivating(false)
     }
   }
 
@@ -448,11 +529,11 @@ export default function SiteDetailPage() {
               </Button>
               <Button
                 variant="outline"
-                onClick={() => setIsDeleteDialogOpen(true)}
-                className="text-red-600 hover:text-red-700 hover:bg-red-50"
+                onClick={handleToggleSiteStatus}
+                className={site.is_active ? 'text-red-600 hover:text-red-700 hover:bg-red-50' : 'text-green-600 hover:text-green-700 hover:bg-green-50'}
               >
-                <Trash2 className="w-4 h-4 mr-2" />
-                Delete
+                <PowerOff className="w-4 h-4 mr-2" />
+                {site.is_active ? 'Deactivate' : 'Reactivate'}
               </Button>
             </div>
           </div>
@@ -682,27 +763,49 @@ export default function SiteDetailPage() {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
+      {/* Deactivation Blocker Modal */}
+      <Dialog open={isDeactivateModalOpen} onOpenChange={setIsDeactivateModalOpen}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>Delete Site</DialogTitle>
+            <DialogTitle className="flex items-center gap-2 text-amber-700">
+              <AlertTriangle className="w-5 h-5" />
+              Cannot Deactivate — Action Required
+            </DialogTitle>
           </DialogHeader>
-          <div className="py-4">
-            <p className="text-slate-600">
-              Are you sure you want to delete <strong>{site.name}</strong> ({site.site_code})?
-              This action cannot be undone.
-            </p>
-          </div>
+          {deactivationBlocker && (
+            <div className="py-4 space-y-3">
+              <p className="text-sm text-slate-700">
+                Deactivating <strong>{site.site_code}</strong> will automatically:
+              </p>
+              <ul className="text-sm text-slate-600 list-disc list-inside space-y-1">
+                {deactivationBlocker.futureShiftCount > 0 && (
+                  <li>Cancel {deactivationBlocker.futureShiftCount} upcoming roster slot{deactivationBlocker.futureShiftCount !== 1 ? 's' : ''}</li>
+                )}
+                {deactivationBlocker.assignedGuardCount > 0 && (
+                  <li>Unassign {deactivationBlocker.assignedGuardCount} guard{deactivationBlocker.assignedGuardCount !== 1 ? 's' : ''} from those shifts</li>
+                )}
+                {deactivationBlocker.activeShiftDefCount > 0 && (
+                  <li>Deactivate {deactivationBlocker.activeShiftDefCount} shift definition{deactivationBlocker.activeShiftDefCount !== 1 ? 's' : ''}</li>
+                )}
+                <li>Mark the site as inactive</li>
+              </ul>
+              <p className="text-sm text-slate-500">Do you want to proceed?</p>
+            </div>
+          )}
           <DialogFooter>
-            <Button variant="outline" onClick={() => setIsDeleteDialogOpen(false)}>
+            <Button
+              variant="outline"
+              onClick={() => { setIsDeactivateModalOpen(false); setDeactivationBlocker(null) }}
+              className="text-slate-700 border-slate-300"
+            >
               Cancel
             </Button>
             <Button
-              onClick={handleDeleteSite}
-              disabled={deleting}
+              onClick={handleForceDeactivate}
+              disabled={deactivating}
               className="bg-red-600 hover:bg-red-700 text-white"
             >
-              {deleting ? 'Deleting...' : 'Delete Site'}
+              {deactivating ? 'Deactivating...' : 'Deactivate Anyway'}
             </Button>
           </DialogFooter>
         </DialogContent>
