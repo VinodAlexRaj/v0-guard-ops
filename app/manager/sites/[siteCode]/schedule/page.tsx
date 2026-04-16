@@ -630,22 +630,19 @@ export default function ManagerSchedulePage() {
         return
       }
 
-      console.log('About to insert:')
-      console.log('  roster_slot_id:', fullSlot.id)
-      console.log('  site_id:', siteUUID)
-      console.log('  guard_id:', selectedGuard.id)
-      console.log('  start_time (raw):', fullSlot.start_time)
-      console.log('  start_time (type):', typeof fullSlot.start_time)
-      console.log('  end_time (raw):', fullSlot.end_time)
-      console.log('  end_time (type):', typeof fullSlot.end_time)
+      const formattedStart = fullSlot.start_time.replace('T', ' ').replace('+08:00', '+08')
+      const formattedEnd = fullSlot.end_time.replace('T', ' ').replace('+08:00', '+08')
 
+      console.log('Formatted for insert:')
+      console.log('  start_time:', formattedStart)
+      console.log('  end_time:', formattedEnd)
 
       const result = await supabase.from('shift_assignments').insert({
         roster_slot_id: fullSlot.id,
         site_id: siteUUID,
         guard_id: selectedGuard.id,
-        start_time: fullSlot.start_time.replace('T', ' ').replace('+08:00', '+08'),
-        end_time: fullSlot.end_time.replace('T', ' ').replace('+08:00', '+08'),
+        start_time: formattedStart,
+        end_time: formattedEnd,
         assignment_type: 'planned',
         reason: null,
         is_cancelled: false,
