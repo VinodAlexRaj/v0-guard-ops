@@ -14,7 +14,7 @@ import {
   DialogFooter,
 } from '@/components/ui/dialog'
 import { Label } from '@/components/ui/label'
-import { LogOut, Eye, MapPin } from 'lucide-react'
+import { LogOut, Eye, MapPin, Plus, Pencil, PowerOff } from 'lucide-react'
 import { supabase } from '@/lib/supabase/client'
 import { getLocalDateString } from '@/lib/utils'
 import { toast } from 'sonner'
@@ -28,6 +28,7 @@ interface Site {
   longitude: number | null
   has_kiosk: boolean
   geofence_radius: number
+  is_active: boolean
 }
 
 interface SiteData {
@@ -45,10 +46,28 @@ export default function ManagerSitesPage() {
   const router = useRouter()
   const [searchQuery, setSearchQuery] = useState('')
   const [kioskFilter, setKioskFilter] = useState('All')
+  const [statusFilter, setStatusFilter] = useState('Active')
   const [loading, setLoading] = useState(true)
   const [dateStr, setDateStr] = useState('')
   const [managerName, setManagerName] = useState('User')
   const [allSites, setAllSites] = useState<SiteData[]>([])
+
+  // Add Site modal state
+  const [isAddModalOpen, setIsAddModalOpen] = useState(false)
+  const [addSiteCode, setAddSiteCode] = useState('')
+  const [addSiteName, setAddSiteName] = useState('')
+  const [addSiteAddress, setAddSiteAddress] = useState('')
+  const [addSiteCodeError, setAddSiteCodeError] = useState('')
+  const [savingAddSite, setSavingAddSite] = useState(false)
+
+  // Edit Site modal state
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false)
+  const [editSite, setEditSite] = useState<SiteData | null>(null)
+  const [editSiteCode, setEditSiteCode] = useState('')
+  const [editSiteName, setEditSiteName] = useState('')
+  const [editSiteAddress, setEditSiteAddress] = useState('')
+  const [editSiteCodeError, setEditSiteCodeError] = useState('')
+  const [savingEditSite, setSavingEditSite] = useState(false)
 
   // Geofence modal state
   const [isGeofenceModalOpen, setIsGeofenceModalOpen] = useState(false)
@@ -98,7 +117,8 @@ export default function ManagerSitesPage() {
 
     setSavingGeofence(true)
     try {
-      const { error } = await supabase
+      // Update sites table
+      const { error: siteError } = await supabase
         .from('sites')
         .update({
           latitude: lat,
@@ -108,7 +128,23 @@ export default function ManagerSitesPage() {
         })
         .eq('id', selectedSite.site.id)
 
-      if (error) throw error
+      if (siteError) throw siteError
+
+      // Upsert geofence_config
+      const { data: { user } } = await supabase.auth.getUser()
+      const { error: configError } = await supabase
+        .from('geofence_config')
+        .upsert({
+          site_id: selectedSite.site.id,
+          center_latitude: lat,
+          center_longitude: lon,
+          radius_meters: radius,
+          configured_by_user_id: user!.id,
+          last_updated_at: new Date().toISOString(),
+          is_active: true,
+        }, { onConflict: 'site_id' })
+
+      if (configError) throw configError
 
       toast.success('Geofence configuration saved')
       setIsGeofenceModalOpen(false)
@@ -118,6 +154,136 @@ export default function ManagerSitesPage() {
       toast.error('Failed to save geofence configuration')
     } finally {
       setSavingGeofence(false)
+    }
+  }
+
+  // Validate site code format
+  const validateSiteCode = (code: string): boolean => {
+    return /^[A-Z]{5}[0-9]{2}$/.test(code)
+  }
+
+  // Handle Add Site
+  const handleOpenAddModal = () => {
+    setAddSiteCode('')
+    setAddSiteName('')
+    setAddSiteAddress('')
+    setAddSiteCodeError('')
+    setIsAddModalOpen(true)
+  }
+
+  const handleAddSite = async () => {
+    if (!addSiteName.trim()) {
+      toast.error('Site name is required')
+      return
+    }
+    if (!validateSiteCode(addSiteCode)) {
+      setAddSiteCodeError('Format: 5 letters + 2 digits (e.g. KLSNT01)')
+      return
+    }
+
+    setSavingAddSite(true)
+    try {
+      const { error } = await supabase
+        .from('sites')
+        .insert({
+          site_code: addSiteCode.toUpperCase(),
+          name: addSiteName.trim(),
+          address: addSiteAddress.trim() || null,
+          is_active: true,
+          has_kiosk: false,
+          geofence_radius: 30,
+        })
+
+      if (error) {
+        if (error.code === '23505') {
+          toast.error('Site code already exists')
+        } else {
+          throw error
+        }
+        return
+      }
+
+      toast.success('Site created')
+      setIsAddModalOpen(false)
+      fetchSites()
+    } catch (error) {
+      console.error('[v0] Error adding site:', error)
+      toast.error('Failed to create site')
+    } finally {
+      setSavingAddSite(false)
+    }
+  }
+
+  // Handle Edit Site
+  const handleOpenEditModal = (siteData: SiteData) => {
+    setEditSite(siteData)
+    setEditSiteCode(siteData.site.site_code)
+    setEditSiteName(siteData.site.name)
+    setEditSiteAddress(siteData.site.address || '')
+    setEditSiteCodeError('')
+    setIsEditModalOpen(true)
+  }
+
+  const handleEditSite = async () => {
+    if (!editSite || !editSiteName.trim()) {
+      toast.error('Site name is required')
+      return
+    }
+    if (!validateSiteCode(editSiteCode)) {
+      setEditSiteCodeError('Format: 5 letters + 2 digits (e.g. KLSNT01)')
+      return
+    }
+
+    setSavingEditSite(true)
+    try {
+      const { error } = await supabase
+        .from('sites')
+        .update({
+          site_code: editSiteCode.toUpperCase(),
+          name: editSiteName.trim(),
+          address: editSiteAddress.trim() || null,
+        })
+        .eq('id', editSite.site.id)
+
+      if (error) {
+        if (error.code === '23505') {
+          toast.error('Site code already exists')
+        } else {
+          throw error
+        }
+        return
+      }
+
+      toast.success('Site updated')
+      setIsEditModalOpen(false)
+      fetchSites()
+    } catch (error) {
+      console.error('[v0] Error editing site:', error)
+      toast.error('Failed to update site')
+    } finally {
+      setSavingEditSite(false)
+    }
+  }
+
+  // Handle Deactivate/Activate Site
+  const handleToggleSiteStatus = async (siteData: SiteData) => {
+    const isActive = siteData.site.is_active
+    const message = isActive ? `Deactivate ${siteData.site.site_code}? This will hide it from supervisors.` : `Reactivate ${siteData.site.site_code}?`
+    
+    if (!confirm(message)) return
+
+    try {
+      const { error } = await supabase
+        .from('sites')
+        .update({ is_active: !isActive })
+        .eq('id', siteData.site.id)
+
+      if (error) throw error
+      toast.success(isActive ? 'Site deactivated' : 'Site reactivated')
+      fetchSites()
+    } catch (error) {
+      console.error('[v0] Error toggling site status:', error)
+      toast.error('Failed to update site status')
     }
   }
 
@@ -154,7 +320,7 @@ export default function ManagerSitesPage() {
       // FETCH 1 — All sites with geofence data
       const { data: sitesData } = await supabase
         .from('sites')
-        .select('id, site_code, name, address, latitude, longitude, has_kiosk, geofence_radius')
+        .select('id, site_code, name, address, latitude, longitude, has_kiosk, geofence_radius, is_active')
 
       if (!sitesData || sitesData.length === 0) {
         setLoading(false)
@@ -224,11 +390,12 @@ export default function ManagerSitesPage() {
 
       setAllSites(siteDataList)
 
-      // Calculate summary stats
+      // Calculate summary stats - active sites only for most metrics
+      const activeSites = siteDataList.filter(s => s.site.is_active)
       setTotalSites(siteDataList.length)
-      setSitesWithKiosk(siteDataList.filter(s => s.site.has_kiosk).length)
-      setGeofenceConfigured(siteDataList.filter(s => s.site.latitude !== null).length)
-      setTotalCheckinsToday(siteDataList.reduce((sum, s) => sum + s.checkInsToday, 0))
+      setSitesWithKiosk(activeSites.filter(s => s.site.has_kiosk).length)
+      setGeofenceConfigured(activeSites.filter(s => s.site.latitude !== null).length)
+      setTotalCheckinsToday(activeSites.reduce((sum, s) => sum + s.checkInsToday, 0))
     } catch (error) {
       console.error('[v0] Error fetching sites:', error)
       toast.error('Failed to load sites')
@@ -254,9 +421,14 @@ export default function ManagerSitesPage() {
         (kioskFilter === 'Has Kiosk' && siteData.site.has_kiosk) ||
         (kioskFilter === 'No Kiosk' && !siteData.site.has_kiosk)
 
-      return matchesSearch && matchesKioskFilter
+      const matchesStatusFilter =
+        statusFilter === 'All Status' ||
+        (statusFilter === 'Active' && siteData.site.is_active) ||
+        (statusFilter === 'Inactive' && !siteData.site.is_active)
+
+      return matchesSearch && matchesKioskFilter && matchesStatusFilter
     })
-  }, [allSites, searchQuery, kioskFilter])
+  }, [allSites, searchQuery, kioskFilter, statusFilter])
 
   return (
     <>
@@ -287,9 +459,15 @@ export default function ManagerSitesPage() {
       {/* Page Content */}
       <div className="p-8">
         {/* Page Title */}
-        <div className="mb-6">
-          <h1 className="text-2xl font-bold text-slate-900">Sites Management</h1>
-          <p className="text-sm text-slate-600 mt-1">Monitor kiosk status, geofence configuration, and check-ins</p>
+        <div className="mb-6 flex items-center justify-between">
+          <div>
+            <h1 className="text-2xl font-bold text-slate-900">Sites Management</h1>
+            <p className="text-sm text-slate-600 mt-1">Monitor kiosk status, geofence configuration, and check-ins</p>
+          </div>
+          <Button onClick={handleOpenAddModal} className="bg-teal-600 hover:bg-teal-700 text-white">
+            <Plus className="w-4 h-4 mr-2" />
+            Add Site
+          </Button>
         </div>
 
         {/* Summary Cards */}
@@ -322,7 +500,7 @@ export default function ManagerSitesPage() {
             className="flex-1 max-w-md"
           />
           <div className="flex items-center gap-2">
-            <span className="text-sm font-medium text-slate-700">Filter:</span>
+            <span className="text-sm font-medium text-slate-700">Kiosk:</span>
             <div className="flex gap-2">
               {['All', 'Has Kiosk', 'No Kiosk'].map(filter => (
                 <button
@@ -330,6 +508,24 @@ export default function ManagerSitesPage() {
                   onClick={() => setKioskFilter(filter)}
                   className={`px-3 py-1.5 rounded text-sm font-medium transition ${
                     kioskFilter === filter
+                      ? 'bg-teal-600 text-white'
+                      : 'bg-slate-200 text-slate-700 hover:bg-slate-300'
+                  }`}
+                >
+                  {filter}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-sm font-medium text-slate-700">Status:</span>
+            <div className="flex gap-2">
+              {['Active', 'Inactive', 'All Status'].map(filter => (
+                <button
+                  key={filter}
+                  onClick={() => setStatusFilter(filter)}
+                  className={`px-3 py-1.5 rounded text-sm font-medium transition ${
+                    statusFilter === filter
                       ? 'bg-teal-600 text-white'
                       : 'bg-slate-200 text-slate-700 hover:bg-slate-300'
                   }`}
@@ -364,7 +560,7 @@ export default function ManagerSitesPage() {
               </thead>
               <tbody className="divide-y divide-slate-200">
                 {filteredSites.map(siteData => (
-                  <tr key={siteData.site.id} className="hover:bg-slate-50">
+                  <tr key={siteData.site.id} className={`hover:bg-slate-50 ${!siteData.site.is_active ? 'opacity-60' : ''}`}>
                     <td className="px-4 py-3">
                       <Badge variant="outline" className="font-mono">
                         {siteData.site.site_code}
@@ -373,6 +569,9 @@ export default function ManagerSitesPage() {
                     <td className="px-4 py-3">
                       <div>
                         <p className="font-medium text-sm text-slate-900">{siteData.site.name}</p>
+                        {!siteData.site.is_active && (
+                          <Badge className="mt-1 bg-slate-200 text-slate-700">Inactive</Badge>
+                        )}
                         {siteData.site.address && (
                           <p className="text-xs text-slate-500">{siteData.site.address}</p>
                         )}
@@ -419,11 +618,29 @@ export default function ManagerSitesPage() {
                         <Button
                           variant="ghost"
                           size="sm"
+                          onClick={() => handleOpenEditModal(siteData)}
+                          className="text-slate-600 hover:text-slate-900"
+                          title="Edit site"
+                        >
+                          <Pencil className="w-4 h-4" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
                           onClick={() => handleOpenGeofenceModal(siteData)}
                           className="text-teal-600 hover:text-teal-900"
                           title="Configure geofence"
                         >
                           <MapPin className="w-4 h-4" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => handleToggleSiteStatus(siteData)}
+                          className={siteData.site.is_active ? 'text-slate-400 hover:text-red-600' : 'text-red-500 hover:text-green-600'}
+                          title={siteData.site.is_active ? 'Deactivate site' : 'Reactivate site'}
+                        >
+                          <PowerOff className="w-4 h-4" />
                         </Button>
                       </div>
                     </td>
@@ -435,7 +652,141 @@ export default function ManagerSitesPage() {
         </Card>
       </div>
 
-      {/* Geofence Config Modal */}
+      {/* Add Site Modal */}
+      <Dialog open={isAddModalOpen} onOpenChange={setIsAddModalOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Add New Site</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div>
+              <Label htmlFor="add-site-code">Site Code *</Label>
+              <Input
+                id="add-site-code"
+                type="text"
+                maxLength={7}
+                value={addSiteCode}
+                onChange={(e) => {
+                  setAddSiteCode(e.target.value.toUpperCase())
+                  setAddSiteCodeError('')
+                }}
+                placeholder="e.g. KLSNT01"
+                className="text-sm"
+              />
+              {addSiteCodeError && (
+                <p className="text-xs text-red-600 mt-1">{addSiteCodeError}</p>
+              )}
+            </div>
+            <div>
+              <Label htmlFor="add-site-name">Site Name *</Label>
+              <Input
+                id="add-site-name"
+                type="text"
+                value={addSiteName}
+                onChange={(e) => setAddSiteName(e.target.value)}
+                placeholder="e.g. KL Sentral Tower"
+                className="text-sm"
+              />
+            </div>
+            <div>
+              <Label htmlFor="add-site-address">Address</Label>
+              <textarea
+                id="add-site-address"
+                value={addSiteAddress}
+                onChange={(e) => setAddSiteAddress(e.target.value)}
+                placeholder="e.g. Jalan Stesen Sentral, Kuala Lumpur"
+                className="w-full px-3 py-2 border border-slate-300 rounded-md text-sm"
+                rows={3}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setIsAddModalOpen(false)}
+              className="text-slate-700 border-slate-300"
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleAddSite}
+              disabled={savingAddSite}
+              className="bg-teal-600 hover:bg-teal-700"
+            >
+              {savingAddSite ? 'Creating...' : 'Create'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Edit Site Modal */}
+      <Dialog open={isEditModalOpen} onOpenChange={setIsEditModalOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Edit Site</DialogTitle>
+          </DialogHeader>
+          {editSite && (
+            <div className="space-y-4 py-4">
+              <div>
+                <Label htmlFor="edit-site-code">Site Code *</Label>
+                <Input
+                  id="edit-site-code"
+                  type="text"
+                  maxLength={7}
+                  value={editSiteCode}
+                  onChange={(e) => {
+                    setEditSiteCode(e.target.value.toUpperCase())
+                    setEditSiteCodeError('')
+                  }}
+                  placeholder="e.g. KLSNT01"
+                  className="text-sm"
+                />
+                {editSiteCodeError && (
+                  <p className="text-xs text-red-600 mt-1">{editSiteCodeError}</p>
+                )}
+              </div>
+              <div>
+                <Label htmlFor="edit-site-name">Site Name *</Label>
+                <Input
+                  id="edit-site-name"
+                  type="text"
+                  value={editSiteName}
+                  onChange={(e) => setEditSiteName(e.target.value)}
+                  placeholder="e.g. KL Sentral Tower"
+                  className="text-sm"
+                />
+              </div>
+              <div>
+                <Label htmlFor="edit-site-address">Address</Label>
+                <textarea
+                  id="edit-site-address"
+                  value={editSiteAddress}
+                  onChange={(e) => setEditSiteAddress(e.target.value)}
+                  placeholder="e.g. Jalan Stesen Sentral, Kuala Lumpur"
+                  className="w-full px-3 py-2 border border-slate-300 rounded-md text-sm"
+                  rows={3}
+                />
+              </div>
+            </div>
+          )}
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setIsEditModalOpen(false)}
+              className="text-slate-700 border-slate-300"
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleEditSite}
+              disabled={savingEditSite}
+              className="bg-teal-600 hover:bg-teal-700"
+            >
+              {savingEditSite ? 'Saving...' : 'Save'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
       <Dialog open={isGeofenceModalOpen} onOpenChange={setIsGeofenceModalOpen}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
