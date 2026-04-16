@@ -203,13 +203,13 @@ export default function SupervisorOverviewPage() {
 
         // BUILD ABSENCE GUARDS TABLE
         const absenceList: AbsentGuard[] = absents.map(a => {
-          const assignment = a.shift_assignments
-          const guardName = assignment?.users?.full_name || 'Unknown'
-          const siteCode = assignment?.roster_slots?.sites?.site_code || 'Unknown'
+          const assignment = a.shift_assignments?.[0]
+          const guardName = assignment?.users?.[0]?.full_name || 'Unknown'
+          const siteCode = assignment?.roster_slots?.[0]?.sites?.[0]?.site_code || 'Unknown'
           // Get shift name from shift_definitions by ID
           const shiftDef = supervisorSites
             .find(ss => ss.site_id === assignment?.site_id)
-            ?.sites?.site_code
+            ?.sites?.[0]?.site_code
 
           return {
             name: guardName,
