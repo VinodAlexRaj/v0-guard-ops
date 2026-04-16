@@ -22,7 +22,7 @@ import {
   DialogTitle,
   DialogFooter,
 } from '@/components/ui/dialog'
-import { LogOut, ArrowLeft, Edit2, Users, Calendar, MapPin, AlertTriangle, PowerOff } from 'lucide-react'
+import { LogOut, ArrowLeft, Edit2, Users, Calendar, MapPin, AlertTriangle, PowerOff, CalendarDays } from 'lucide-react'
 import { supabase } from '@/lib/supabase/client'
 import { getLocalDateString } from '@/lib/utils'
 import { toast } from 'sonner'
@@ -427,6 +427,12 @@ export default function SiteDetailPage() {
               )}
             </div>
             <div className="flex gap-2">
+              <Button variant="outline" asChild className="bg-teal-50 text-teal-700 border-teal-200 hover:bg-teal-100">
+                <Link href={`/manager/sites/${site.site_code}/schedule`}>
+                  <CalendarDays className="w-4 h-4 mr-2" />
+                  View Schedule
+                </Link>
+              </Button>
               <Button variant="outline" onClick={handleOpenEditModal}>
                 <Edit2 className="w-4 h-4 mr-2" />
                 Edit
