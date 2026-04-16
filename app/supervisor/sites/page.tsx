@@ -118,9 +118,9 @@ export default function SupervisorSitesPage() {
           const fillRate = totalRequired > 0 ? Math.round((totalAssigned / totalRequired) * 100) : 0
 
           return {
-            code: ss.sites.site_code,
-            name: ss.sites.name,
-            address: ss.sites.address,
+            code: ss.sites[0].site_code,
+            name: ss.sites[0].name,
+            address: ss.sites[0].address,
             activeShifts,
             fillRate,
             openSlots,
