@@ -7,20 +7,13 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table'
-import {
   Dialog,
   DialogContent,
   DialogHeader,
   DialogTitle,
   DialogFooter,
 } from '@/components/ui/dialog'
+import { Label } from '@/components/ui/label'
 import {
   Select,
   SelectContent,
@@ -28,9 +21,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { Checkbox } from '@/components/ui/checkbox'
-import { Field, FieldGroup, FieldLabel } from '@/components/ui/field'
-import { LogOut, ArrowRight, Plus, UserCheck, Users, X } from 'lucide-react'
+import { LogOut, ArrowRight, Plus } from 'lucide-react'
 import { supabase } from '@/lib/supabase/client'
 import { getLocalDateString } from '@/lib/utils'
 
@@ -64,13 +55,15 @@ export default function ManagerSitesPage() {
   const [totalSites, setTotalSites] = useState(0)
   const [sitesWithGaps, setSitesWithGaps] = useState(0)
   const [fullyFilled, setFullyFilled] = useState(0)
-
-  const [showAddSite, setShowAddSite] = useState(false)
+  
+  // Add Site modal state
+  const [isAddModalOpen, setIsAddModalOpen] = useState(false)
   const [newSiteCode, setNewSiteCode] = useState('')
   const [newSiteName, setNewSiteName] = useState('')
   const [newSiteAddress, setNewSiteAddress] = useState('')
-  const [addSiteLoading, setAddSiteLoading] = useState(false)
-  const [addSiteError, setAddSiteError] = useState('')
+  const [newSiteSupervisor, setNewSiteSupervisor] = useState('')
+  const [supervisorList, setSupervisorList] = useState<{ id: string; name: string }[]>([])
+  const [saving, setSaving] = useState(false)
 
   const [supervisorUsers, setSupervisorUsers] = useState<SupervisorUser[]>([])
   const [showAssignSupervisor, setShowAssignSupervisor] = useState(false)
@@ -93,144 +86,76 @@ export default function ManagerSitesPage() {
     router.push(`/manager/sites/${siteCode}`)
   }
 
-  const handleAddSite = async (e: React.FormEvent) => {
-    e.preventDefault()
-    setAddSiteError('')
-    setAddSiteLoading(true)
-
-    const code = newSiteCode.trim().toUpperCase()
-    const name = newSiteName.trim()
-    const address = newSiteAddress.trim() || null
-
-    if (!code || !name) {
-      setAddSiteError('Site code and name are required.')
-      setAddSiteLoading(false)
-      return
+  // Fetch all supervisors for dropdown
+  const fetchSupervisorList = async () => {
+    const { data } = await supabase
+      .from('users')
+      .select('id, full_name')
+      .eq('external_role', 'OPERATIONS EXECUTIVE')
+      .eq('is_active', true)
+    if (data) {
+      setSupervisorList(data.map(u => ({ id: u.id, name: u.full_name })))
     }
+  }
 
-    const { error } = await supabase
-      .from('sites')
-      .insert({ site_code: code, name, address })
-
-    if (error) {
-      setAddSiteError(
-        error.code === '23505'
-          ? `Site code "${code}" already exists.`
-          : error.message
-      )
-      setAddSiteLoading(false)
-      return
-    }
-
-    // Reset form and close dialog
+  const handleOpenAddModal = () => {
+    fetchSupervisorList()
     setNewSiteCode('')
     setNewSiteName('')
     setNewSiteAddress('')
-    setShowAddSite(false)
-    setAddSiteLoading(false)
-
-    // Re-fetch sites to include the new one
-    setAllSites([])
-    setLoading(true)
-    fetchSites()
+    setNewSiteSupervisor('')
+    setIsAddModalOpen(true)
   }
 
-  const handleOpenAssign = (site: SiteRow) => {
-    setAssigningSite(site)
-    setSelectedSupervisorId(site.supervisorId || '__none__')
-    setAssignError('')
-    setShowAssignSupervisor(true)
-  }
-
-  const handleSaveAssignment = async () => {
-    if (!assigningSite) return
-    setAssignLoading(true)
-    setAssignError('')
-
-    // Remove all existing supervisor assignments for this site
-    const { error: deleteError } = await supabase
-      .from('supervisor_sites')
-      .delete()
-      .eq('site_id', assigningSite.siteId)
-
-    if (deleteError) {
-      setAssignError(deleteError.message)
-      setAssignLoading(false)
+  const handleAddSite = async () => {
+    if (!newSiteCode.trim() || !newSiteName.trim()) {
+      alert('Site code and name are required')
       return
     }
 
-    // Insert new assignment if a real supervisor was selected (__none__ = unassign only)
-    if (selectedSupervisorId && selectedSupervisorId !== '__none__') {
-      const { error: insertError } = await supabase
-        .from('supervisor_sites')
-        .insert({ supervisor_id: selectedSupervisorId, site_id: assigningSite.siteId })
+    setSaving(true)
+    try {
+      // Insert new site
+      const { data: newSite, error: siteError } = await supabase
+        .from('sites')
+        .insert({
+          site_code: newSiteCode.toUpperCase().trim(),
+          name: newSiteName.trim(),
+          address: newSiteAddress.trim() || null,
+        })
+        .select('id')
+        .single()
 
-      if (insertError) {
-        setAssignError(insertError.message)
-        setAssignLoading(false)
+      if (siteError) {
+        console.error('[v0] Error creating site:', siteError)
+        alert('Error creating site: ' + siteError.message)
+        setSaving(false)
         return
       }
+
+      // Assign supervisor if selected
+      if (newSiteSupervisor && newSite) {
+        const { error: supError } = await supabase
+          .from('supervisor_sites')
+          .insert({
+            supervisor_id: newSiteSupervisor,
+            site_id: newSite.id,
+          })
+
+        if (supError) {
+          console.error('[v0] Error assigning supervisor:', supError)
+        }
+      }
+
+      setIsAddModalOpen(false)
+      // Refresh the page data
+      window.location.reload()
+    } catch (error) {
+      console.error('[v0] Error adding site:', error)
+      alert('Error adding site')
+    } finally {
+      setSaving(false)
     }
-
-    setShowAssignSupervisor(false)
-    setAssignLoading(false)
-    fetchSites()
-  }
-
-  const toggleSite = (siteId: string) => {
-    setSelectedSiteIds(prev => {
-      const next = new Set(prev)
-      next.has(siteId) ? next.delete(siteId) : next.add(siteId)
-      return next
-    })
-  }
-
-  const toggleAll = (filteredRows: SiteRow[]) => {
-    const allSelected = filteredRows.every(s => selectedSiteIds.has(s.siteId))
-    if (allSelected) {
-      setSelectedSiteIds(new Set())
-    } else {
-      setSelectedSiteIds(new Set(filteredRows.map(s => s.siteId)))
-    }
-  }
-
-  const handleBulkAssign = async () => {
-    if (!bulkSupervisorId || selectedSiteIds.size === 0) return
-    setBulkLoading(true)
-    setBulkError('')
-
-    const siteIdArray = Array.from(selectedSiteIds)
-
-    // Delete all existing supervisor assignments for selected sites
-    const { error: deleteError } = await supabase
-      .from('supervisor_sites')
-      .delete()
-      .in('site_id', siteIdArray)
-
-    if (deleteError) {
-      setBulkError(deleteError.message)
-      setBulkLoading(false)
-      return
-    }
-
-    // Insert new assignment for each selected site
-    const { error: insertError } = await supabase
-      .from('supervisor_sites')
-      .insert(siteIdArray.map(siteId => ({
-        supervisor_id: bulkSupervisorId,
-        site_id: siteId,
-      })))
-
-    if (insertError) {
-      setBulkError(insertError.message)
-      setBulkLoading(false)
-      return
-    }
-
-    setSelectedSiteIds(new Set())
-    setBulkSupervisorId('')
-    setBulkLoading(false)
-    fetchSites()
   }
 
   // Set date on mount
@@ -427,7 +352,7 @@ export default function ManagerSitesPage() {
             <h1 className="text-lg font-bold text-slate-900 mb-1">All Sites</h1>
             <p className="text-sm text-slate-600">{totalSites} sites across {supervisors.length - 1} supervisors</p>
           </div>
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-4">
             <Input
               type="text"
               placeholder="Search site code or name..."
@@ -435,10 +360,7 @@ export default function ManagerSitesPage() {
               onChange={(e) => setSearchQuery(e.target.value)}
               className="w-64"
             />
-            <Button
-              onClick={() => { setAddSiteError(''); setShowAddSite(true) }}
-              className="bg-slate-900 hover:bg-slate-700 text-white"
-            >
+            <Button onClick={handleOpenAddModal} className="bg-teal-600 hover:bg-teal-700 text-white">
               <Plus className="w-4 h-4 mr-2" />
               Add Site
             </Button>
@@ -600,180 +522,66 @@ export default function ManagerSitesPage() {
         </div>
       </div>
 
-      {/* Bulk Action Bar */}
-      {anySelected && (
-        <div className="fixed bottom-0 inset-x-0 z-50 flex items-center justify-between gap-4 border-t border-slate-200 bg-white px-8 py-4 shadow-lg">
-          <div className="flex items-center gap-3">
-            <div className="flex items-center gap-2 text-sm font-medium text-slate-900">
-              <Users className="w-4 h-4 text-slate-500" />
-              {selectedSiteIds.size} site{selectedSiteIds.size !== 1 ? 's' : ''} selected
-            </div>
-            <button
-              onClick={() => { setSelectedSiteIds(new Set()); setBulkSupervisorId(''); setBulkError('') }}
-              className="flex items-center gap-1 text-xs text-slate-500 hover:text-slate-700 transition"
-            >
-              <X className="w-3.5 h-3.5" />
-              Clear
-            </button>
-          </div>
-
-          <div className="flex items-center gap-3">
-            {bulkError && (
-              <p className="text-sm text-red-600">{bulkError}</p>
-            )}
-            <Select value={bulkSupervisorId} onValueChange={setBulkSupervisorId}>
-              <SelectTrigger className="w-56">
-                <SelectValue placeholder="Select supervisor..." />
-              </SelectTrigger>
-              <SelectContent>
-                {supervisorUsers.map(sup => (
-                  <SelectItem key={sup.id} value={sup.id}>
-                    {sup.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <Button
-              onClick={handleBulkAssign}
-              disabled={!bulkSupervisorId || bulkLoading}
-              className="bg-slate-900 hover:bg-slate-700 text-white disabled:opacity-50"
-            >
-              {bulkLoading
-                ? 'Assigning...'
-                : `Assign to ${selectedSiteIds.size} site${selectedSiteIds.size !== 1 ? 's' : ''}`}
-            </Button>
-          </div>
-        </div>
-      )}
-
-      {/* Add Site Dialog */}
-      <Dialog open={showAddSite} onOpenChange={setShowAddSite}>
+      {/* Add Site Modal */}
+      <Dialog open={isAddModalOpen} onOpenChange={setIsAddModalOpen}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>Add new site</DialogTitle>
+            <DialogTitle>Add New Site</DialogTitle>
           </DialogHeader>
-          <form onSubmit={handleAddSite}>
-            <FieldGroup>
-              <Field>
-                <FieldLabel htmlFor="site-code">Site code</FieldLabel>
-                <Input
-                  id="site-code"
-                  placeholder="e.g. KLSNT01"
-                  value={newSiteCode}
-                  onChange={(e) => setNewSiteCode(e.target.value.toUpperCase())}
-                  required
-                />
-              </Field>
-              <Field>
-                <FieldLabel htmlFor="site-name">Site name</FieldLabel>
-                <Input
-                  id="site-name"
-                  placeholder="e.g. Sentral Tower"
-                  value={newSiteName}
-                  onChange={(e) => setNewSiteName(e.target.value)}
-                  required
-                />
-              </Field>
-              <Field>
-                <FieldLabel htmlFor="site-address">Address <span className="text-slate-400 font-normal">(optional)</span></FieldLabel>
-                <Input
-                  id="site-address"
-                  placeholder="e.g. Jalan Stesen Sentral 5, KL"
-                  value={newSiteAddress}
-                  onChange={(e) => setNewSiteAddress(e.target.value)}
-                />
-              </Field>
-              {addSiteError && (
-                <p className="text-sm text-red-600">{addSiteError}</p>
-              )}
-            </FieldGroup>
-            <DialogFooter className="mt-6">
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => setShowAddSite(false)}
-                disabled={addSiteLoading}
-              >
-                Cancel
-              </Button>
-              <Button
-                type="submit"
-                disabled={addSiteLoading}
-                className="bg-slate-900 hover:bg-slate-700 text-white"
-              >
-                {addSiteLoading ? 'Saving...' : 'Add site'}
-              </Button>
-            </DialogFooter>
-          </form>
-        </DialogContent>
-      </Dialog>
-      {/* Assign Supervisor Dialog */}
-      <Dialog open={showAssignSupervisor} onOpenChange={setShowAssignSupervisor}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>Assign supervisor</DialogTitle>
-          </DialogHeader>
-
-          {assigningSite && (
-            <div className="space-y-4">
-              {/* Site info */}
-              <div className="rounded-md bg-slate-50 border border-slate-200 px-4 py-3">
-                <p className="text-xs text-slate-500 mb-0.5">Site</p>
-                <p className="text-sm font-semibold text-slate-900">{assigningSite.name}</p>
-                <p className="text-xs text-slate-500 font-mono mt-0.5">{assigningSite.code}</p>
-              </div>
-
-              {/* Current supervisor */}
-              <div>
-                <p className="text-xs text-slate-500 mb-1">Current supervisor</p>
-                <p className="text-sm text-slate-700">
-                  {assigningSite.supervisor === 'Unassigned'
-                    ? <span className="text-slate-400 italic">Unassigned</span>
-                    : assigningSite.supervisor}
-                </p>
-              </div>
-
-              {/* Supervisor select */}
-              <Field>
-                <FieldLabel htmlFor="assign-supervisor">New supervisor</FieldLabel>
-                <Select
-                  value={selectedSupervisorId}
-                  onValueChange={setSelectedSupervisorId}
-                >
-                  <SelectTrigger id="assign-supervisor" className="w-full">
-                    <SelectValue placeholder="Select a supervisor..." />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="__none__">— Unassign —</SelectItem>
-                    {supervisorUsers.map(sup => (
-                      <SelectItem key={sup.id} value={sup.id}>
-                        {sup.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </Field>
-
-              {assignError && (
-                <p className="text-sm text-red-600">{assignError}</p>
-              )}
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label htmlFor="siteCode">Site Code *</Label>
+              <Input
+                id="siteCode"
+                placeholder="e.g. KLSNT01"
+                value={newSiteCode}
+                onChange={(e) => setNewSiteCode(e.target.value)}
+              />
             </div>
-          )}
-
-          <DialogFooter className="mt-2">
-            <Button
-              variant="outline"
-              onClick={() => setShowAssignSupervisor(false)}
-              disabled={assignLoading}
-            >
+            <div className="space-y-2">
+              <Label htmlFor="siteName">Site Name *</Label>
+              <Input
+                id="siteName"
+                placeholder="e.g. KL Sentral Tower"
+                value={newSiteName}
+                onChange={(e) => setNewSiteName(e.target.value)}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="siteAddress">Address</Label>
+              <Input
+                id="siteAddress"
+                placeholder="e.g. Jalan Stesen Sentral, Kuala Lumpur"
+                value={newSiteAddress}
+                onChange={(e) => setNewSiteAddress(e.target.value)}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="supervisor">Assign Supervisor</Label>
+              <Select value={newSiteSupervisor} onValueChange={setNewSiteSupervisor}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select a supervisor" />
+                </SelectTrigger>
+                <SelectContent>
+                  {supervisorList.map((sup) => (
+                    <SelectItem key={sup.id} value={sup.id}>
+                      {sup.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsAddModalOpen(false)}>
               Cancel
             </Button>
-            <Button
-              onClick={handleSaveAssignment}
-              disabled={assignLoading}
-              className="bg-slate-900 hover:bg-slate-700 text-white"
+            <Button 
+              onClick={handleAddSite} 
+              disabled={saving}
+              className="bg-teal-600 hover:bg-teal-700 text-white"
             >
-              {assignLoading ? 'Saving...' : 'Save'}
+              {saving ? 'Adding...' : 'Add Site'}
             </Button>
           </DialogFooter>
         </DialogContent>
