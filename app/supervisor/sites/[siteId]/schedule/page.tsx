@@ -63,14 +63,24 @@ interface SelectedCellData {
   date: string
   filled: number
   required: number
-  dayIndex: number
   shiftIndex: number
+  dayIndex: number
+  hasSlot: boolean
 }
 
 interface SiteRecord {
   id: string
   site_code: string
   name?: string | null
+}
+
+function getWeekStart(date: Date): Date {
+  const d = new Date(date)
+  const day = d.getDay()
+  const diff = day === 0 ? -6 : 1 - day
+  d.setDate(d.getDate() + diff)
+  d.setHours(0, 0, 0, 0)
+  return d
 }
 
 function formatDisplayDate(date: Date): string {
@@ -87,13 +97,10 @@ function combineDateAndTime(dateString: string, timeString: string): Date {
   return new Date(`${dateString}T${normalizedTime}`)
 }
 
-function getWeekStart(date: Date): Date {
-  const d = new Date(date)
-  const day = d.getDay()
-  const diff = day === 0 ? -6 : 1 - day
-  d.setDate(d.getDate() + diff)
-  d.setHours(0, 0, 0, 0)
-  return d
+function formatTimeRange(startTime: string, endTime: string): string {
+  const start = startTime.slice(0, 5)
+  const end = endTime.slice(0, 5)
+  return `${start}–${end}`
 }
 
 export default function SchedulePage() {
@@ -109,6 +116,7 @@ export default function SchedulePage() {
   const [selectedSlotId, setSelectedSlotId] = useState<string | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
   const [selectedGuard, setSelectedGuard] = useState<Guard | null>(null)
+
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -122,7 +130,7 @@ export default function SchedulePage() {
   const [guardShiftCounts, setGuardShiftCounts] = useState<Map<string, Map<string, number>>>(new Map())
 
   const [siteUUID, setSiteUUID] = useState<string | null>(null)
-  const [siteName, setSiteName] = useState<string>('')
+  const [siteName, setSiteName] = useState('')
   const [supervisorName, setSupervisorName] = useState('Supervisor')
 
   const slotsRef = useRef<Slot[]>([])
@@ -131,17 +139,17 @@ export default function SchedulePage() {
 
   const weekStart = weekStartDate
   const weekEnd = useMemo(() => {
-    const end = new Date(weekStartDate)
-    end.setDate(end.getDate() + 6)
-    return end
+    const d = new Date(weekStartDate)
+    d.setDate(d.getDate() + 6)
+    return d
   }, [weekStartDate])
 
   const days = useMemo(
     () =>
       Array.from({ length: 7 }, (_, i) => {
-        const date = new Date(weekStartDate)
-        date.setDate(weekStartDate.getDate() + i)
-        return date
+        const d = new Date(weekStartDate)
+        d.setDate(weekStartDate.getDate() + i)
+        return d
       }),
     [weekStartDate]
   )
@@ -216,7 +224,6 @@ export default function SchedulePage() {
     if (roleError) throw roleError
 
     const guardRoles = [...new Set((roleMappings || []).map((r: any) => r.external_role).filter(Boolean))]
-
     const fallbackRoles = ['SECURITY OFFICER', 'NEPALESE SECURITY OFFICER']
     const rolesToUse = guardRoles.length > 0 ? guardRoles : fallbackRoles
 
@@ -231,6 +238,35 @@ export default function SchedulePage() {
 
     setGuardsDirectory((guards || []) as Guard[])
   }, [])
+
+  const syncSelection = useCallback(
+    (nextSlots: Slot[], nextShiftDefs: ShiftDefinition[]) => {
+      if (nextSlots.length === 0) {
+        setSelectedSlotId(null)
+        setSelectedCell({ shiftIndex: 0, dayIndex: 0 })
+        return
+      }
+
+      const currentStillExists =
+        selectedSlotId && nextSlots.some((slot) => slot.id === selectedSlotId)
+
+      const slotToUse = currentStillExists
+        ? nextSlots.find((slot) => slot.id === selectedSlotId) || nextSlots[0]
+        : nextSlots[0]
+
+      const shiftIndex = nextShiftDefs.findIndex((def) => def.id === slotToUse.shift_definition_id)
+      const dayIndex = days.findIndex(
+        (day) => getLocalDateString(day) === getLocalDateString(new Date(slotToUse.shift_date))
+      )
+
+      setSelectedSlotId(slotToUse.id)
+      setSelectedCell({
+        shiftIndex: shiftIndex >= 0 ? shiftIndex : 0,
+        dayIndex: dayIndex >= 0 ? dayIndex : 0,
+      })
+    },
+    [days, selectedSlotId]
+  )
 
   const fetchSchedule = useCallback(
     async (actualSiteUUID: string) => {
@@ -271,11 +307,14 @@ export default function SchedulePage() {
       }
 
       const assignedGuardIds = [...new Set(assignmentsData.map((a) => a.guard_id))]
-      const { data: guardsData, error: guardsDataError } = assignedGuardIds.length
-        ? await supabase.from('users').select('id, full_name, external_employee_code, external_role').in('id', assignedGuardIds)
+      const { data: guardsData, error: assignedGuardError } = assignedGuardIds.length
+        ? await supabase
+          .from('users')
+          .select('id, full_name, external_employee_code, external_role')
+          .in('id', assignedGuardIds)
         : { data: [], error: null }
 
-      if (guardsDataError) throw guardsDataError
+      if (assignedGuardError) throw assignedGuardError
 
       const { data: leaveData, error: leaveError } = await supabase
         .from('leaves')
@@ -296,41 +335,9 @@ export default function SchedulePage() {
       setAssignedGuardProfiles((guardsData || []) as Guard[])
       setGuardLeave((leaveData || []) as LeaveRecord[])
       calculateGuardShiftCounts(assignmentsData, nextSlots)
-
-      const slotStillExists = selectedSlotId && nextSlots.some((slot) => slot.id === selectedSlotId)
-
-      if (slotStillExists) {
-        const keptSlot = nextSlots.find((slot) => slot.id === selectedSlotId)!
-        const shiftIndex = nextShiftDefs.findIndex((def) => def.id === keptSlot.shift_definition_id)
-        const dayIndex = days.findIndex(
-          (day) => getLocalDateString(day) === getLocalDateString(new Date(keptSlot.shift_date))
-        )
-
-        if (shiftIndex >= 0 && dayIndex >= 0) {
-          setSelectedCell({ shiftIndex, dayIndex })
-        }
-      } else {
-        const firstSlot = nextSlots[0] || null
-
-        if (!firstSlot) {
-          setSelectedSlotId(null)
-          setSelectedCell({ shiftIndex: 0, dayIndex: 0 })
-          return
-        }
-
-        const shiftIndex = nextShiftDefs.findIndex((def) => def.id === firstSlot.shift_definition_id)
-        const dayIndex = days.findIndex(
-          (day) => getLocalDateString(day) === getLocalDateString(new Date(firstSlot.shift_date))
-        )
-
-        setSelectedSlotId(firstSlot.id)
-        setSelectedCell({
-          shiftIndex: shiftIndex >= 0 ? shiftIndex : 0,
-          dayIndex: dayIndex >= 0 ? dayIndex : 0,
-        })
-      }
+      syncSelection(nextSlots, nextShiftDefs)
     },
-    [calculateGuardShiftCounts, days, selectedSlotId, weekEnd, weekStartDate]
+    [calculateGuardShiftCounts, syncSelection, weekEnd, weekStartDate]
   )
 
   useEffect(() => {
@@ -383,6 +390,7 @@ export default function SchedulePage() {
 
   useEffect(() => {
     if (!siteUUID) return
+
     fetchSchedule(siteUUID).catch((err) => {
       setError(err instanceof Error ? err.message : 'Failed to refresh schedule')
     })
@@ -403,10 +411,10 @@ export default function SchedulePage() {
       const guard = guardMap.get(assignment.guard_id)
       if (!guard) return
 
+      const shiftIndex = shiftDefs.findIndex((def) => def.id === slot.shift_definition_id)
       const dayIndex = days.findIndex(
         (day) => getLocalDateString(day) === getLocalDateString(new Date(slot.shift_date))
       )
-      const shiftIndex = shiftDefs.findIndex((def) => def.id === slot.shift_definition_id)
 
       if (shiftIndex >= 0 && dayIndex >= 0) {
         grid[shiftIndex][dayIndex].push({
@@ -462,22 +470,30 @@ export default function SchedulePage() {
     const shiftIndex = selectedCell.shiftIndex
     const dayIndex = selectedCell.dayIndex
     const slot = getSlotForCell(shiftIndex, dayIndex)
-    const required = slot ? getRequiredHeadcountForSlot(slot.id) : 0
-    const filled = slot ? assignments.filter((a) => a.roster_slot_id === slot.id).length : getRosterCell(shiftIndex, dayIndex).length
-    const date = days[dayIndex] || new Date()
 
+    const required = slot ? getRequiredHeadcountForSlot(slot.id) : 0
+    const filled = slot
+      ? assignments.filter((a) => a.roster_slot_id === slot.id).length
+      : getRosterCell(shiftIndex, dayIndex).length
+
+    const date = days[dayIndex] || new Date()
     const shiftDef = slot
       ? shiftDefs.find((sd) => sd.id === slot.shift_definition_id)
       : shiftDefs[shiftIndex] || null
 
     return {
       shift: shiftDef?.shift_name || 'Shift',
-      time: slot ? `${slot.start_time}–${slot.end_time}` : '—',
-      date: date.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: '2-digit' }),
+      time: slot ? formatTimeRange(slot.start_time, slot.end_time) : '—',
+      date: date.toLocaleDateString('en-US', {
+        weekday: 'short',
+        month: 'short',
+        day: '2-digit',
+      }),
       filled,
       required,
-      dayIndex,
       shiftIndex,
+      dayIndex,
+      hasSlot: !!slot,
     }
   }, [assignments, days, getRequiredHeadcountForSlot, getRosterCell, getSlotForCell, selectedCell, shiftDefs])
 
@@ -519,7 +535,9 @@ export default function SchedulePage() {
     if (message.includes('Headcount exceeded')) return 'This slot is already full.'
     if (message.includes('Guard is on approved leave')) return 'This guard is on approved leave on that date.'
     if (message.includes('Invalid assignment')) return 'The assignment falls outside the slot time window.'
-    if (message.includes('no_double_booking') || message.includes('No double booking')) return 'This guard is already assigned to another shift at this time.'
+    if (message.includes('no_double_booking') || message.includes('No double booking')) {
+      return 'This guard is already assigned to another shift at this time.'
+    }
     if (message.includes('adhoc_validation')) return 'Ad-hoc assignments require a reason.'
     return message
   }
@@ -532,7 +550,7 @@ export default function SchedulePage() {
 
       const fullSlot = slotsRef.current.find((s) => s.id === selectedSlot.id)
       if (!fullSlot) {
-        alert('Could not find slot data')
+        alert('No valid roster slot exists for this cell.')
         return
       }
 
@@ -555,15 +573,15 @@ export default function SchedulePage() {
         return
       }
 
-      const { data: allGuardAssignments, error: allAssignmentsError } = await supabase
+      const { data: guardAssignments, error: guardAssignmentsError } = await supabase
         .from('shift_assignments')
         .select('id, roster_slot_id')
         .eq('guard_id', selectedGuard.id)
         .eq('is_cancelled', false)
 
-      if (allAssignmentsError) throw allAssignmentsError
+      if (guardAssignmentsError) throw guardAssignmentsError
 
-      const otherSlotIds = [...new Set((allGuardAssignments || []).map((a: any) => a.roster_slot_id).filter(Boolean))]
+      const otherSlotIds = [...new Set((guardAssignments || []).map((a: any) => a.roster_slot_id).filter(Boolean))]
 
       let otherSlots: Slot[] = []
       if (otherSlotIds.length > 0) {
@@ -576,10 +594,10 @@ export default function SchedulePage() {
         otherSlots = (otherSlotsData || []) as Slot[]
       }
 
-      const fullSlotStart = combineDateAndTime(fullSlot.shift_date, fullSlot.start_time)
-      const fullSlotEnd = combineDateAndTime(fullSlot.shift_date, fullSlot.end_time)
-      if (fullSlotEnd <= fullSlotStart) {
-        fullSlotEnd.setDate(fullSlotEnd.getDate() + 1)
+      const newStart = combineDateAndTime(fullSlot.shift_date, fullSlot.start_time)
+      const newEnd = combineDateAndTime(fullSlot.shift_date, fullSlot.end_time)
+      if (newEnd <= newStart) {
+        newEnd.setDate(newEnd.getDate() + 1)
       }
 
       const overlaps = otherSlots.some((slot) => {
@@ -591,7 +609,7 @@ export default function SchedulePage() {
           slotEnd.setDate(slotEnd.getDate() + 1)
         }
 
-        return slotStart < fullSlotEnd && slotEnd > fullSlotStart
+        return slotStart < newEnd && slotEnd > newStart
       })
 
       if (overlaps) {
@@ -641,6 +659,9 @@ export default function SchedulePage() {
     }
   }
 
+  const cellData = getSelectedCellData()
+  const assignedGuards = getRosterCell(cellData.shiftIndex, cellData.dayIndex)
+
   return (
     <>
       <header className="border-b border-slate-200 bg-white px-8 py-4">
@@ -653,7 +674,12 @@ export default function SchedulePage() {
                 Supervisor
               </Badge>
             </div>
-            <Button variant="ghost" size="sm" onClick={handleSignOut} className="text-slate-600 hover:text-slate-900">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={handleSignOut}
+              className="text-slate-600 hover:text-slate-900"
+            >
               <LogOut className="w-4 h-4 mr-2" />
               Sign out
             </Button>
@@ -691,7 +717,8 @@ export default function SchedulePage() {
             <div className="flex-1">
               <div className="mb-6">
                 <Badge className="bg-slate-100 text-slate-700 border-0 px-3 py-1 text-sm">
-                  {siteCode}{siteName ? ` · ${siteName}` : ''}
+                  {siteCode}
+                  {siteName ? ` · ${siteName}` : ''}
                 </Badge>
               </div>
 
@@ -710,7 +737,8 @@ export default function SchedulePage() {
                     <ChevronLeft className="w-5 h-5" />
                   </Button>
                   <span className="text-sm font-medium text-slate-900">
-                    {weekStart.getDate()} – {weekEnd.getDate()} {weekStart.toLocaleDateString('en-US', { month: 'short', year: 'numeric' })}
+                    {weekStart.getDate()} – {weekEnd.getDate()}{' '}
+                    {weekStart.toLocaleDateString('en-US', { month: 'short', year: 'numeric' })}
                   </span>
                   <Button
                     variant="ghost"
@@ -736,7 +764,8 @@ export default function SchedulePage() {
                     return (
                       <div
                         key={idx}
-                        className={`p-3 rounded-lg border ${isToday ? 'bg-blue-50 border-blue-200' : 'bg-white border-slate-200'}`}
+                        className={`p-3 rounded-lg border ${isToday ? 'bg-blue-50 border-blue-200' : 'bg-white border-slate-200'
+                          }`}
                       >
                         <div className="text-xs font-semibold text-slate-700 mb-2">{dayNames[idx]}</div>
                         <div className={`text-lg font-bold ${getCoverageColor(coverage)}`}>{coverage}%</div>
@@ -757,9 +786,10 @@ export default function SchedulePage() {
                           return (
                             <th
                               key={idx}
-                              className={`px-4 py-3 text-center text-xs font-semibold ${isToday ? 'bg-blue-50' : ''} text-slate-700`}
+                              className={`px-4 py-3 text-center text-xs font-semibold ${isToday ? 'bg-blue-50' : ''
+                                } text-slate-700`}
                             >
-                              {dayNames[idx]} {day.getDate()}
+                              {dayNames[idx]}
                             </th>
                           )
                         })}
@@ -772,6 +802,7 @@ export default function SchedulePage() {
                             <div>{shiftDef.shift_name}</div>
                             <div className="text-xs text-slate-600">{shiftDef.shift_code}</div>
                           </td>
+
                           {days.map((day, dayIdx) => {
                             const isToday = getLocalDateString(day) === getLocalDateString(new Date())
                             const slot = getSlotForCell(shiftIdx, dayIdx)
@@ -787,6 +818,7 @@ export default function SchedulePage() {
                                 onClick={() => {
                                   setSelectedCell({ shiftIndex: shiftIdx, dayIndex: dayIdx })
                                   setSelectedSlotId(slot?.id || null)
+                                  setSelectedGuard(null)
                                 }}
                                 className={`px-4 py-3 text-center cursor-pointer transition ${isSelected ? 'bg-teal-50 border-2 border-teal-300' : isToday ? 'bg-blue-50' : ''
                                   }`}
@@ -796,14 +828,25 @@ export default function SchedulePage() {
                                     const dateStr = getLocalDateString(day)
                                     const guardMap = guardShiftCounts.get(dateStr) || new Map()
                                     const shiftCount = guardMap.get(cell.guardId) || 1
+
                                     return (
-                                      <div key={cellIdx} className={`px-2 py-1 rounded text-xs font-medium ${getChipColor(cell.assignmentType, shiftCount)}`}>
+                                      <div
+                                        key={cellIdx}
+                                        className={`px-2 py-1 rounded text-xs font-medium ${getChipColor(
+                                          cell.assignmentType,
+                                          shiftCount
+                                        )}`}
+                                      >
                                         {cell.guardName}
                                       </div>
                                     )
                                   })}
+
                                   {Array.from({ length: unfilled }).map((_, idx) => (
-                                    <div key={`empty-${idx}`} className={`px-2 py-1 rounded text-xs font-medium ${getChipColor(null)}`}>
+                                    <div
+                                      key={`empty-${idx}`}
+                                      className={`px-2 py-1 rounded text-xs font-medium ${getChipColor(null)}`}
+                                    >
                                       + assign
                                     </div>
                                   ))}
@@ -820,7 +863,9 @@ export default function SchedulePage() {
 
               <div>
                 <div className="mb-4 p-3 bg-amber-50 border border-amber-200 rounded text-xs text-amber-800">
-                  <strong>Shift Overload Warning:</strong> Guards highlighted in <strong>amber</strong> are assigned to 2 shifts today. Guards in <strong>red</strong> are assigned to 3+ shifts — please review.
+                  <strong>Shift Overload Warning:</strong> Guards highlighted in <strong>amber</strong>{' '}
+                  are assigned to 2 shifts today. Guards in <strong>red</strong> are assigned to 3+ shifts
+                  — please review.
                 </div>
 
                 <div className="flex flex-col gap-2 text-xs text-slate-600">
@@ -846,147 +891,164 @@ export default function SchedulePage() {
 
             <div className="w-72 flex-shrink-0">
               <Card className="border-slate-200 p-6 sticky top-8">
-                {(() => {
-                  const cellData = getSelectedCellData()
-                  const assignedGuards = getRosterCell(cellData.shiftIndex, cellData.dayIndex)
-                  return (
-                    <>
-                      <h3 className="text-lg font-bold text-slate-900 mb-2">
-                        {cellData.shift} — {cellData.date}
-                      </h3>
-                      <div className="text-sm text-slate-600 mb-4">
-                        {cellData.time} · {siteCode} · {cellData.filled} of {cellData.required} filled
-                      </div>
+                <h3 className="text-lg font-bold text-slate-900 mb-2">
+                  {cellData.shift} — {cellData.date}
+                </h3>
 
-                      <div className="mb-4">
-                        <div className="w-full bg-slate-200 rounded h-2">
-                          <div
-                            className="bg-teal-600 h-2 rounded transition-all"
-                            style={{ width: `${cellData.required > 0 ? (cellData.filled / cellData.required) * 100 : 0}%` }}
-                          ></div>
-                        </div>
-                      </div>
+                <div className="text-sm text-slate-600 mb-4">
+                  {cellData.time} · {siteCode} · {cellData.filled} of {cellData.required} filled
+                </div>
 
-                      <div className="mb-6 pb-6 border-b border-slate-200">
-                        <h4 className="text-sm font-semibold text-slate-900 mb-3">Assigned</h4>
-                        <div className="space-y-2">
-                          {assignedGuards.map((cell, idx) => (
-                            <div key={idx} className="flex items-center justify-between bg-slate-50 p-3 rounded">
-                              <div>
-                                <div className="text-sm font-medium text-slate-900">{cell.guardName}</div>
-                                <Badge
-                                  variant="secondary"
-                                  className={`text-xs mt-1 ${cell.assignmentType === 'planned' ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'
-                                    }`}
-                                >
-                                  {cell.assignmentType}
-                                </Badge>
-                              </div>
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => cancelAssignment(cell.assignmentId)}
-                                className="text-slate-600 hover:text-red-600"
-                              >
-                                ✕
-                              </Button>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
+                <div className="mb-4">
+                  <div className="w-full bg-slate-200 rounded h-2">
+                    <div
+                      className="bg-teal-600 h-2 rounded transition-all"
+                      style={{
+                        width: `${cellData.required > 0 ? (cellData.filled / cellData.required) * 100 : 0}%`,
+                      }}
+                    ></div>
+                  </div>
+                </div>
 
-                      <div>
-                        <h4 className="text-sm font-semibold text-slate-900 mb-3">Add guard</h4>
+                {!cellData.hasSlot && (
+                  <div className="mb-6 rounded border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-700">
+                    No roster slot exists for this shift/date.
+                  </div>
+                )}
 
-                        <Input
-                          type="text"
-                          placeholder="Search guards..."
-                          value={searchQuery}
-                          onChange={(e) => setSearchQuery(e.target.value)}
-                          className="mb-4 text-sm"
-                        />
-
-                        <div className="space-y-2 mb-4 max-h-48 overflow-y-auto">
-                          {filteredGuards
-                            .filter((guard) => {
-                              const isAlreadyAssignedToThisSlot =
-                                selectedSlot && assignments.some((a) => a.guard_id === guard.id && a.roster_slot_id === selectedSlot.id)
-                              return !isAlreadyAssignedToThisSlot
-                            })
-                            .map((guard) => {
-                              const dateStr = selectedSlot ? getLocalDateString(new Date(selectedSlot.shift_date)) : null
-
-                              const isOnLeave =
-                                !!dateStr &&
-                                guardLeave.some((leave) => guard.id === leave.user_id && leave.leave_date === dateStr)
-
-                              const assignmentOnOtherSlotToday =
-                                !!dateStr &&
-                                assignments.find((a) => {
-                                  const slotDate = slotsRef.current.find((s) => s.id === a.roster_slot_id)?.shift_date
-                                  const assignmentDateStr = slotDate ? getLocalDateString(new Date(slotDate)) : null
-                                  return (
-                                    a.guard_id === guard.id &&
-                                    assignmentDateStr === dateStr &&
-                                    a.roster_slot_id !== selectedSlot?.id
-                                  )
-                                })
-
-                              const shiftNameForBadge = assignmentOnOtherSlotToday
-                                ? getShiftNameForAssignment(assignmentOnOtherSlotToday.id)
-                                : null
-
-                              const isDisabled = isOnLeave
-                              const isSelected = selectedGuard?.id === guard.id
-
-                              return (
-                                <button
-                                  key={guard.id}
-                                  onClick={() => !isDisabled && setSelectedGuard(guard)}
-                                  disabled={isDisabled}
-                                  className={`w-full text-left px-3 py-2 rounded text-sm font-medium transition ${isDisabled
-                                      ? 'bg-slate-100 text-slate-400 cursor-not-allowed'
-                                      : isSelected
-                                        ? 'bg-teal-50 text-teal-700 border-2 border-teal-300'
-                                        : 'bg-slate-50 text-slate-700 hover:bg-slate-100 border border-slate-200'
-                                    }`}
-                                >
-                                  <div className="flex items-center justify-between gap-2">
-                                    <span>{guard.full_name}</span>
-                                    <div className="flex items-center gap-2">
-                                      {shiftNameForBadge && !isDisabled && (
-                                        <Badge className="bg-teal-500 text-white text-xs">Assigned: {shiftNameForBadge}</Badge>
-                                      )}
-                                      {isOnLeave && <span className="text-xs text-red-600">(on leave)</span>}
-                                    </div>
-                                  </div>
-                                </button>
-                              )
-                            })}
-                        </div>
-
-                        {saving ? (
-                          <Button disabled className="w-full bg-slate-400" size="sm">
-                            Saving...
-                          </Button>
-                        ) : cellData.required > 0 && cellData.filled >= cellData.required ? (
-                          <div className="text-center text-sm text-amber-600 font-medium py-2 bg-amber-50 rounded">
-                            Slot is full ({cellData.filled}/{cellData.required})
-                          </div>
-                        ) : (
-                          <Button
-                            onClick={saveAssignment}
-                            disabled={!selectedGuard || !selectedSlot}
-                            className="w-full bg-teal-600 hover:bg-teal-700"
-                            size="sm"
+                <div className="mb-6 pb-6 border-b border-slate-200">
+                  <h4 className="text-sm font-semibold text-slate-900 mb-3">Assigned</h4>
+                  <div className="space-y-2">
+                    {assignedGuards.map((cell, idx) => (
+                      <div key={idx} className="flex items-center justify-between bg-slate-50 p-3 rounded">
+                        <div>
+                          <div className="text-sm font-medium text-slate-900">{cell.guardName}</div>
+                          <Badge
+                            variant="secondary"
+                            className={`text-xs mt-1 ${cell.assignmentType === 'planned'
+                                ? 'bg-green-100 text-green-700'
+                                : 'bg-amber-100 text-amber-700'
+                              }`}
                           >
-                            Save
-                          </Button>
-                        )}
+                            {cell.assignmentType}
+                          </Badge>
+                        </div>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => cancelAssignment(cell.assignmentId)}
+                          className="text-slate-600 hover:text-red-600"
+                        >
+                          ✕
+                        </Button>
                       </div>
-                    </>
-                  )
-                })()}
+                    ))}
+                  </div>
+                </div>
+
+                <div>
+                  <h4 className="text-sm font-semibold text-slate-900 mb-3">Add guard</h4>
+
+                  <Input
+                    type="text"
+                    placeholder="Search guards..."
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    className="mb-4 text-sm"
+                  />
+
+                  <div className="space-y-2 mb-4 max-h-48 overflow-y-auto">
+                    {filteredGuards
+                      .filter((guard) => {
+                        const isAlreadyAssignedToThisSlot =
+                          selectedSlot &&
+                          assignments.some(
+                            (a) => a.guard_id === guard.id && a.roster_slot_id === selectedSlot.id
+                          )
+                        return !isAlreadyAssignedToThisSlot
+                      })
+                      .map((guard) => {
+                        const dateStr = selectedSlot
+                          ? getLocalDateString(new Date(selectedSlot.shift_date))
+                          : null
+
+                        const isOnLeave =
+                          !!dateStr &&
+                          guardLeave.some((leave) => guard.id === leave.user_id && leave.leave_date === dateStr)
+
+                        const assignmentOnOtherSlotToday =
+                          !!dateStr &&
+                          assignments.find((a) => {
+                            const slotDate = slotsRef.current.find((s) => s.id === a.roster_slot_id)?.shift_date
+                            const assignmentDateStr = slotDate
+                              ? getLocalDateString(new Date(slotDate))
+                              : null
+
+                            return (
+                              a.guard_id === guard.id &&
+                              assignmentDateStr === dateStr &&
+                              a.roster_slot_id !== selectedSlot?.id
+                            )
+                          })
+
+                        const shiftNameForBadge = assignmentOnOtherSlotToday
+                          ? getShiftNameForAssignment(assignmentOnOtherSlotToday.id)
+                          : null
+
+                        const isDisabled = isOnLeave
+                        const isSelected = selectedGuard?.id === guard.id
+
+                        return (
+                          <button
+                            key={guard.id}
+                            onClick={() => !isDisabled && setSelectedGuard(guard)}
+                            disabled={isDisabled}
+                            className={`w-full text-left px-3 py-2 rounded text-sm font-medium transition ${isDisabled
+                                ? 'bg-slate-100 text-slate-400 cursor-not-allowed'
+                                : isSelected
+                                  ? 'bg-teal-50 text-teal-700 border-2 border-teal-300'
+                                  : 'bg-slate-50 text-slate-700 hover:bg-slate-100 border border-slate-200'
+                              }`}
+                          >
+                            <div className="flex items-center justify-between gap-2">
+                              <span>{guard.full_name}</span>
+                              <div className="flex items-center gap-2">
+                                {shiftNameForBadge && !isDisabled && (
+                                  <Badge className="bg-teal-500 text-white text-xs">
+                                    Assigned: {shiftNameForBadge}
+                                  </Badge>
+                                )}
+                                {isOnLeave && <span className="text-xs text-red-600">(on leave)</span>}
+                              </div>
+                            </div>
+                          </button>
+                        )
+                      })}
+                  </div>
+
+                  {saving ? (
+                    <Button disabled className="w-full bg-slate-400" size="sm">
+                      Saving...
+                    </Button>
+                  ) : !cellData.hasSlot ? (
+                    <Button disabled className="w-full bg-slate-300 text-slate-600" size="sm">
+                      No Slot Available
+                    </Button>
+                  ) : cellData.required > 0 && cellData.filled >= cellData.required ? (
+                    <div className="text-center text-sm text-amber-600 font-medium py-2 bg-amber-50 rounded">
+                      Slot is full ({cellData.filled}/{cellData.required})
+                    </div>
+                  ) : (
+                    <Button
+                      onClick={saveAssignment}
+                      disabled={!selectedGuard || !selectedSlot}
+                      className="w-full bg-teal-600 hover:bg-teal-700"
+                      size="sm"
+                    >
+                      Save
+                    </Button>
+                  )}
+                </div>
               </Card>
             </div>
           </>
