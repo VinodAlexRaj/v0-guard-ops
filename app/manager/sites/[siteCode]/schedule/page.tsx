@@ -629,7 +629,16 @@ export default function ManagerSchedulePage() {
         alert('This guard is already assigned to another shift at this time.')
         return
       }
+      console.log('saveAssignment:')
+      console.log('  selectedSlot.id:', selectedSlot?.id)
+      console.log('  fullSlot.id:', fullSlot?.id)
+      console.log('  fullSlot.shift_date:', fullSlot?.shift_date)
+      console.log('  fullSlot.start_time:', fullSlot?.start_time)
+      console.log('  fullSlot.end_time:', fullSlot?.end_time)
 
+      const { error } = await supabase.from('shift_assignments').insert({
+        // ... rest
+      })
       // fullSlot.start_time and end_time are already full timestamps from the database
       // No need to combine with shift_date — use them directly as-is
       const { error } = await supabase.from('shift_assignments').insert({
