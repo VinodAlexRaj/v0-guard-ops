@@ -101,9 +101,9 @@ export default function SupervisorOverviewPage() {
         const siteMap: Record<string, { id: string; code: string; name: string }> = {}
         supervisorSites.forEach(ss => {
           siteMap[ss.site_id] = {
-            id: ss.sites.id,
-            code: ss.sites.site_code,
-            name: ss.sites.name,
+            id: ss.sites[0]?.id || '',
+            code: ss.sites[0]?.site_code || '',
+            name: ss.sites[0]?.name || '',
           }
         })
 
