@@ -14,7 +14,7 @@ import {
   DialogFooter,
 } from '@/components/ui/dialog'
 import { Label } from '@/components/ui/label'
-import { LogOut, Eye, Plus, Pencil, PowerOff, AlertTriangle } from 'lucide-react'
+import { LogOut, Eye, Plus, Pencil, PowerOff, AlertTriangle, CalendarDays } from 'lucide-react'
 import { supabase } from '@/lib/supabase/client'
 import { getLocalDateString } from '@/lib/utils'
 import { toast } from 'sonner'
@@ -760,6 +760,11 @@ export default function ManagerSitesPage() {
                           onClick={() => handleViewSite(sd.site.site_code)}
                           className="text-slate-600 hover:text-slate-900">
                           <Eye className="w-4 h-4" />
+                        </Button>
+                        <Button variant="ghost" size="sm" title="View schedule"
+                          onClick={() => router.push(`/manager/sites/${sd.site.site_code}/schedule`)}
+                          className="text-teal-600 hover:text-teal-800">
+                          <CalendarDays className="w-4 h-4" />
                         </Button>
                         <Button variant="ghost" size="sm" title="Edit site"
                           onClick={() => handleOpenEditModal(sd)}
