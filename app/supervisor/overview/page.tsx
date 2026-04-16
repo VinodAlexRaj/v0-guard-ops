@@ -141,7 +141,7 @@ export default function SupervisorOverviewPage() {
           .eq('status', 'absent')
 
         const absents = (absentsRaw || []).filter(
-          a => a.shift_assignments && siteIds.includes(a.shift_assignments.site_id)
+          a => siteIds.includes(a.site_id)
         )
 
         // STEP 3 — BUILD SITE ROWS (coverage-based calculations only)
