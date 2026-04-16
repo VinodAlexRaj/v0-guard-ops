@@ -546,8 +546,8 @@ export default function ShiftsPage() {
                   key={site.id}
                   onClick={() => setSelectedSiteCode(site.site_code)}
                   className={`w-full rounded-md px-3 py-2 text-left text-sm transition ${selectedSiteCode === site.site_code
-                      ? 'bg-teal-50 font-medium text-teal-900'
-                      : 'text-slate-700 hover:bg-slate-100'
+                    ? 'bg-teal-50 font-medium text-teal-900'
+                    : 'text-slate-700 hover:bg-slate-100'
                     }`}
                 >
                   <div className="flex items-start justify-between gap-3">
@@ -661,7 +661,7 @@ export default function ShiftsPage() {
                                   {formatTime(shift.start_time)}–{formatTime(shift.end_time)}
                                 </span>
                                 {isOvernightShift(shift.start_time, shift.end_time) && (
-                                  <span className="ml-2 text-xs text-amber-600">(next day)</span>
+                                  <span className="ml-2 text-xs text-amber-600">(+1)</span>
                                 )}
                               </div>
                             </td>
@@ -870,8 +870,8 @@ export default function ShiftsPage() {
                             key={day.value}
                             onClick={() => handleDayToggle(day.value)}
                             className={`rounded-full px-3 py-1.5 text-sm font-medium transition ${formValues.days_of_week.includes(day.value)
-                                ? 'bg-teal-600 text-white'
-                                : 'bg-slate-200 text-slate-700 hover:bg-slate-300'
+                              ? 'bg-teal-600 text-white'
+                              : 'bg-slate-200 text-slate-700 hover:bg-slate-300'
                               }`}
                           >
                             {day.label}
