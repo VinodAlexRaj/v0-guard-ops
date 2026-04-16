@@ -6,7 +6,11 @@ import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
-import { LogOut } from 'lucide-react'
+import { Label } from '@/components/ui/label'
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Checkbox } from '@/components/ui/checkbox'
+import { LogOut, Users, Search, UserCheck, Clock, UserX, Edit2, CheckCircle2 } from 'lucide-react'
 import { supabase } from '@/lib/supabase/client'
 import { getLocalDateString } from '@/lib/utils'
 
@@ -204,7 +208,6 @@ export default function ManagerGuardsPage() {
 
         const override = guardSupRows.find((g: any) => g.guard_id === staff.id)
 
-        // Supabase FK joins return object (not array) for single relations
         const overrideSup = (override?.supervisor as any) as { full_name: string } | null
         let supervisor: string | null = overrideSup?.full_name || null
         const supervisorId: string | null = override?.supervisor_id || null
@@ -291,7 +294,7 @@ export default function ManagerGuardsPage() {
     setEditingGuard(guard)
     setFormValues({
       supervisor: guard.supervisorId || '',
-      isActive: guard.status === 'Active',
+      isActive: guard.status !== 'Inactive',
     })
     setIsModalOpen(true)
   }
@@ -370,370 +373,380 @@ export default function ManagerGuardsPage() {
     }
   }
 
+  const handleSelectAll = (checked: boolean) => {
+    if (checked) {
+      setSelectedGuardIds(filteredGuards.map(g => g.id))
+    } else {
+      setSelectedGuardIds([])
+    }
+  }
+
+  const getInitials = (name: string) => {
+    return name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2)
+  }
+
   const getAvatarColor = (role: string) => {
-    if (role === 'OPERATIONS EXECUTIVE') return 'bg-purple-600'
-    if (role === 'NEPALESE SECURITY OFFICER') return 'bg-blue-600'
-    return 'bg-teal-600'
+    if (role === 'OPERATIONS EXECUTIVE') return 'bg-purple-500'
+    if (role === 'NEPALESE SECURITY OFFICER') return 'bg-blue-500'
+    return 'bg-teal-500'
   }
 
-  const getStatusColor = (status: string) => {
-    if (status === 'Active') return 'bg-green-100 text-green-700'
-    if (status === 'On leave') return 'bg-amber-100 text-amber-700'
-    return 'bg-slate-200 text-slate-700'
+  const getStatusBadge = (status: string) => {
+    if (status === 'Active') return 'bg-emerald-50 text-emerald-700 border-emerald-200'
+    if (status === 'On leave') return 'bg-amber-50 text-amber-700 border-amber-200'
+    return 'bg-slate-100 text-slate-600 border-slate-200'
   }
 
-  const getRoleBadgeColor = (role: string) => {
-    if (role === 'OPERATIONS EXECUTIVE') return 'bg-purple-100 text-purple-700'
-    if (role === 'NEPALESE SECURITY OFFICER') return 'bg-blue-100 text-blue-700'
-    return 'bg-teal-100 text-teal-700'
+  const getRoleBadge = (role: string) => {
+    if (role === 'OPERATIONS EXECUTIVE') return 'bg-purple-50 text-purple-700'
+    if (role === 'NEPALESE SECURITY OFFICER') return 'bg-blue-50 text-blue-700'
+    return 'bg-slate-100 text-slate-600'
   }
+
+  const uniqueRoles = useMemo(() => {
+    const roles = new Set(allStaff.map(g => g.role))
+    return ['All', ...Array.from(roles)]
+  }, [allStaff])
 
   return (
-    <>
-      <header className="border-b border-slate-200 bg-white px-8 py-4">
+    <div className="min-h-screen bg-slate-50">
+      {/* Header */}
+      <header className="sticky top-0 z-10 border-b border-slate-200 bg-white px-6 py-3">
         <div className="flex items-center justify-between">
-          <div className="text-sm text-slate-600">{dateStr}</div>
+          <div className="flex items-center gap-3">
+            <div className="flex items-center justify-center w-9 h-9 rounded-lg bg-teal-600">
+              <Users className="w-5 h-5 text-white" />
+            </div>
+            <div>
+              <h1 className="text-lg font-semibold text-slate-900">Guard Management</h1>
+              <p className="text-xs text-slate-500">{dateStr}</p>
+            </div>
+          </div>
           <div className="flex items-center gap-4">
             <div className="text-right">
               <p className="text-sm font-medium text-slate-900">{managerName}</p>
-              <Badge variant="secondary" className="mt-1">
-                Manager
-              </Badge>
+              <Badge variant="secondary" className="text-xs">Manager</Badge>
             </div>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={handleSignOut}
-              className="text-slate-600 hover:text-slate-900"
-            >
-              <LogOut className="w-4 h-4 mr-2" />
-              Sign out
+            <Button variant="ghost" size="sm" onClick={handleSignOut} className="text-slate-500 hover:text-slate-700">
+              <LogOut className="w-4 h-4" />
             </Button>
           </div>
         </div>
       </header>
 
-      <div className="p-8">
-        <div className="mb-8 flex items-center justify-between">
-          <div>
-            <h3 className="text-lg font-bold text-slate-900 mb-1">Guard Management</h3>
-            <p className="text-sm text-slate-600">{totalGuards} guards across your sites</p>
-          </div>
-          <Input
-            type="text"
-            placeholder="Search name, code, site or phone..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-72"
-          />
+      <main className="p-6 space-y-6">
+        {/* Summary Cards */}
+        <div className="grid grid-cols-4 gap-4">
+          <Card className="p-4 bg-white border-0 shadow-sm">
+            <div className="flex items-center gap-3">
+              <div className="flex items-center justify-center w-10 h-10 rounded-full bg-blue-100">
+                <Users className="w-5 h-5 text-blue-600" />
+              </div>
+              <div>
+                <p className="text-2xl font-bold text-slate-900">{totalGuards}</p>
+                <p className="text-xs text-slate-500">Total Guards</p>
+              </div>
+            </div>
+          </Card>
+          <Card className="p-4 bg-white border-0 shadow-sm">
+            <div className="flex items-center gap-3">
+              <div className="flex items-center justify-center w-10 h-10 rounded-full bg-emerald-100">
+                <UserCheck className="w-5 h-5 text-emerald-600" />
+              </div>
+              <div>
+                <p className="text-2xl font-bold text-slate-900">{activeGuards}</p>
+                <p className="text-xs text-slate-500">Active</p>
+              </div>
+            </div>
+          </Card>
+          <Card className="p-4 bg-white border-0 shadow-sm">
+            <div className="flex items-center gap-3">
+              <div className="flex items-center justify-center w-10 h-10 rounded-full bg-amber-100">
+                <Clock className="w-5 h-5 text-amber-600" />
+              </div>
+              <div>
+                <p className="text-2xl font-bold text-slate-900">{onLeaveGuards}</p>
+                <p className="text-xs text-slate-500">On Leave Today</p>
+              </div>
+            </div>
+          </Card>
+          <Card className="p-4 bg-white border-0 shadow-sm">
+            <div className="flex items-center gap-3">
+              <div className="flex items-center justify-center w-10 h-10 rounded-full bg-slate-100">
+                <UserX className="w-5 h-5 text-slate-500" />
+              </div>
+              <div>
+                <p className="text-2xl font-bold text-slate-900">{inactiveGuards}</p>
+                <p className="text-xs text-slate-500">Inactive</p>
+              </div>
+            </div>
+          </Card>
         </div>
 
-        <Card className="p-4 border-slate-200 mb-6">
-          <div className="flex flex-wrap items-end gap-4">
-            <div>
-              <label className="block text-sm font-medium text-slate-700 mb-2">
-                Assign selected guards to supervisor
-              </label>
-              <select
-                value={bulkSupervisorId}
-                onChange={(e) => setBulkSupervisorId(e.target.value)}
-                className="w-64 px-3 py-2 border border-slate-300 rounded-md text-sm text-slate-900"
-              >
-                <option value="">Select supervisor</option>
-                {supervisorList.map((supervisor) => (
-                  <option key={supervisor.id} value={supervisor.id}>
-                    {supervisor.full_name}
-                  </option>
-                ))}
-              </select>
+        {/* Search and Filters */}
+        <Card className="p-4 bg-white border-0 shadow-sm">
+          <div className="flex flex-col gap-4">
+            {/* Search and Bulk Action Row */}
+            <div className="flex items-center justify-between gap-4">
+              <div className="relative flex-1 max-w-md">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                <Input
+                  type="text"
+                  placeholder="Search by name, code, site, or phone..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="pl-9 bg-slate-50 border-slate-200"
+                />
+              </div>
+              
+              {/* Bulk Assignment */}
+              <div className="flex items-center gap-3">
+                <Select value={bulkSupervisorId} onValueChange={setBulkSupervisorId}>
+                  <SelectTrigger className="w-48 bg-slate-50 border-slate-200">
+                    <SelectValue placeholder="Select supervisor" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {supervisorList.map((sup) => (
+                      <SelectItem key={sup.id} value={sup.id}>{sup.full_name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Button
+                  onClick={handleBulkAssignSupervisor}
+                  disabled={bulkAssigning || selectedGuardIds.length === 0}
+                  size="sm"
+                  className="bg-teal-600 hover:bg-teal-700"
+                >
+                  <CheckCircle2 className="w-4 h-4 mr-2" />
+                  {bulkAssigning ? 'Assigning...' : `Assign (${selectedGuardIds.length})`}
+                </Button>
+              </div>
             </div>
 
-            <div>
-              <Button
-                onClick={handleBulkAssignSupervisor}
-                disabled={bulkAssigning || selectedGuardIds.length === 0}
-                className="bg-slate-700 hover:bg-slate-800"
-              >
-                {bulkAssigning
-                  ? 'Assigning...'
-                  : `Bulk Assign Supervisor (${selectedGuardIds.length})`}
-              </Button>
+            {/* Filter Pills */}
+            <div className="flex flex-wrap items-center gap-6 text-sm">
+              <div className="flex items-center gap-2">
+                <span className="text-slate-500 font-medium">Status:</span>
+                <div className="flex gap-1">
+                  {['All', 'Active', 'On leave', 'Inactive'].map((status) => (
+                    <button
+                      key={status}
+                      onClick={() => setStatusFilter(status)}
+                      className={`px-3 py-1 rounded-full text-xs font-medium transition ${
+                        statusFilter === status
+                          ? 'bg-teal-600 text-white'
+                          : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                      }`}
+                    >
+                      {status}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              
+              <div className="flex items-center gap-2">
+                <span className="text-slate-500 font-medium">Role:</span>
+                <Select value={roleFilter} onValueChange={setRoleFilter}>
+                  <SelectTrigger className="h-7 w-auto min-w-[140px] text-xs bg-slate-50 border-slate-200">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {uniqueRoles.map((role) => (
+                      <SelectItem key={role} value={role} className="text-xs">
+                        {role === 'All' ? 'All Roles' : role.replace(/_/g, ' ')}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <span className="text-slate-500 font-medium">Supervisor:</span>
+                <Select value={supervisorFilter} onValueChange={setSupervisorFilter}>
+                  <SelectTrigger className="h-7 w-auto min-w-[140px] text-xs bg-slate-50 border-slate-200">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {supervisors.map((sup) => (
+                      <SelectItem key={sup} value={sup} className="text-xs">
+                        {sup === 'All' ? 'All Supervisors' : sup}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="ml-auto text-xs text-slate-500">
+                Showing {filteredGuards.length} of {totalGuards} guards
+              </div>
             </div>
           </div>
         </Card>
 
-        <div className="mb-6 space-y-3">
-          <div className="flex items-center gap-3">
-            <span className="text-sm font-medium text-slate-700 min-w-max">Supervisor:</span>
-            <div className="flex gap-2 flex-wrap">
-              {supervisors.map((supervisor) => (
-                <button
-                  key={supervisor}
-                  onClick={() => setSupervisorFilter(supervisor)}
-                  className={`px-4 py-2 rounded-full text-sm font-medium transition ${supervisorFilter === supervisor
-                      ? 'bg-slate-700 text-white'
-                      : 'bg-slate-200 text-slate-700 hover:bg-slate-300'
-                    }`}
-                >
-                  {supervisor}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div className="flex items-center gap-3">
-            <span className="text-sm font-medium text-slate-700 min-w-max">Role:</span>
-            <div className="flex gap-2 flex-wrap">
-              {['All', 'SECURITY OFFICER', 'NEPALESE SECURITY OFFICER'].map((role) => (
-                <button
-                  key={role}
-                  onClick={() => setRoleFilter(role)}
-                  className={`px-4 py-2 rounded-full text-sm font-medium transition ${roleFilter === role
-                      ? 'bg-slate-700 text-white'
-                      : 'bg-slate-200 text-slate-700 hover:bg-slate-300'
-                    }`}
-                >
-                  {role === 'All' ? 'All' : role.replace(/_/g, ' ')}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div className="flex items-center gap-3">
-            <span className="text-sm font-medium text-slate-700 min-w-max">Status:</span>
-            <div className="flex gap-2 flex-wrap">
-              {['All', 'Active', 'On leave', 'Inactive'].map((status) => (
-                <button
-                  key={status}
-                  onClick={() => setStatusFilter(status)}
-                  className={`px-4 py-2 rounded-full text-sm font-medium transition ${statusFilter === status
-                      ? 'bg-slate-700 text-white'
-                      : 'bg-slate-200 text-slate-700 hover:bg-slate-300'
-                    }`}
-                >
-                  {status}
-                </button>
-              ))}
-            </div>
-          </div>
-        </div>
-
-        <div className="grid grid-cols-4 gap-4 mb-6">
-          <Card className="p-4 border-slate-200">
-            <p className="text-xs text-slate-600 mb-1">Total guards</p>
-            <p className="text-2xl font-bold text-blue-600">{totalGuards}</p>
-          </Card>
-          <Card className="p-4 border-slate-200">
-            <p className="text-xs text-slate-600 mb-1">Active</p>
-            <p className="text-2xl font-bold text-green-600">{activeGuards}</p>
-          </Card>
-          <Card className="p-4 border-slate-200">
-            <p className="text-xs text-slate-600 mb-1">On leave today</p>
-            <p className="text-2xl font-bold text-amber-600">{onLeaveGuards}</p>
-          </Card>
-          <Card className="p-4 border-slate-200">
-            <p className="text-xs text-slate-600 mb-1">Inactive</p>
-            <p className="text-2xl font-bold text-slate-400">{inactiveGuards}</p>
-          </Card>
-        </div>
-
-        <Card className="border-slate-200 overflow-hidden">
+        {/* Table */}
+        <Card className="bg-white border-0 shadow-sm overflow-hidden">
           {loading ? (
-            <div className="p-8 text-center text-slate-600">Loading guard data...</div>
+            <div className="p-12 text-center">
+              <div className="inline-block w-8 h-8 border-3 border-slate-200 border-t-teal-600 rounded-full animate-spin" />
+              <p className="mt-3 text-sm text-slate-500">Loading guards...</p>
+            </div>
           ) : filteredGuards.length === 0 ? (
-            <div className="p-8 text-center text-slate-600">
-              No guards found matching your filters.
+            <div className="p-12 text-center">
+              <Users className="w-12 h-12 mx-auto text-slate-300 mb-3" />
+              <p className="text-sm text-slate-500">No guards found matching your filters.</p>
             </div>
           ) : (
-            <table className="w-full">
-              <thead className="bg-slate-50">
-                <tr className="border-slate-200">
-                  <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700">
-                    Select
-                  </th>
-                  <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700">
-                    Guard
-                  </th>
-                  <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700">
-                    Employee Code
-                  </th>
-                  <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700">
-                    Site
-                  </th>
-                  <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700">
-                    Phone
-                  </th>
-                  <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700">
-                    Role
-                  </th>
-                  <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700">
-                    Supervisor
-                  </th>
-                  <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700">
-                    Status
-                  </th>
-                  <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700">
-                    Joined
-                  </th>
-                  <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700">
-                    Action
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredGuards.map((guard) => (
-                  <tr key={guard.id} className="border-b border-slate-200 hover:bg-slate-50">
-                    <td className="px-4 py-3">
-                      <input
-                        type="checkbox"
-                        checked={selectedGuardIds.includes(guard.id)}
-                        onChange={(e) => {
-                          if (e.target.checked) {
-                            setSelectedGuardIds((prev) => [...prev, guard.id])
-                          } else {
-                            setSelectedGuardIds((prev) =>
-                              prev.filter((id) => id !== guard.id)
-                            )
-                          }
-                        }}
-                        className="w-4 h-4 rounded border-slate-300"
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead>
+                  <tr className="bg-slate-50 border-b border-slate-100">
+                    <th className="px-4 py-3 text-left w-12">
+                      <Checkbox
+                        checked={selectedGuardIds.length === filteredGuards.length && filteredGuards.length > 0}
+                        onCheckedChange={handleSelectAll}
                       />
-                    </td>
-
-                    <td className="px-4 py-3">
-                      <div className="flex items-center gap-3">
-                        <div
-                          className={`w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-bold ${getAvatarColor(
-                            guard.role
-                          )}`}
-                        >
-                          {guard.name
-                            .split(' ')
-                            .map((n: string) => n[0])
-                            .join('')
-                            .toUpperCase()
-                            .slice(0, 2)}
-                        </div>
-                        <div>
-                          <div className="text-sm font-medium text-slate-900">{guard.name}</div>
-                        </div>
-                      </div>
-                    </td>
-
-                    <td className="px-4 py-3">
-                      <span className="text-sm text-slate-700">{guard.code}</span>
-                    </td>
-
-                    <td className="px-4 py-3">
-                      <span className="text-sm text-slate-700">{guard.siteCode || '—'}</span>
-                    </td>
-
-                    <td className="px-4 py-3">
-                      <span className="text-sm text-slate-700">{guard.phone}</span>
-                    </td>
-
-                    <td className="px-4 py-3">
-                      <Badge className={`border-0 ${getRoleBadgeColor(guard.role)}`}>
-                        {guard.role.replace(/_/g, ' ')}
-                      </Badge>
-                    </td>
-
-                    <td className="px-4 py-3">
-                      <span className="text-sm text-slate-700">{guard.supervisor || '—'}</span>
-                    </td>
-
-                    <td className="px-4 py-3">
-                      <Badge className={`border-0 ${getStatusColor(guard.status)}`}>
-                        {guard.status}
-                      </Badge>
-                    </td>
-
-                    <td className="px-4 py-3">
-                      <span className="text-sm text-slate-700">{guard.joined}</span>
-                    </td>
-
-                    <td className="px-4 py-3">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => handleEditGuard(guard)}
-                        className="text-slate-700 border-slate-300 hover:bg-slate-50"
-                      >
-                        Edit
-                      </Button>
-                    </td>
+                    </th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">Guard</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">Code</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">Site</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">Phone</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">Role</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">Supervisor</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">Status</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">Joined</th>
+                    <th className="px-4 py-3 text-right text-xs font-semibold text-slate-500 uppercase tracking-wider w-20">Action</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {filteredGuards.map((guard) => (
+                    <tr key={guard.id} className="hover:bg-slate-50/50 transition-colors">
+                      <td className="px-4 py-3">
+                        <Checkbox
+                          checked={selectedGuardIds.includes(guard.id)}
+                          onCheckedChange={(checked) => {
+                            if (checked) {
+                              setSelectedGuardIds((prev) => [...prev, guard.id])
+                            } else {
+                              setSelectedGuardIds((prev) => prev.filter((id) => id !== guard.id))
+                            }
+                          }}
+                        />
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-3">
+                          <div className={`w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-medium ${getAvatarColor(guard.role)}`}>
+                            {getInitials(guard.name)}
+                          </div>
+                          <span className="text-sm font-medium text-slate-900">{guard.name}</span>
+                        </div>
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className="text-sm text-slate-600 font-mono">{guard.code}</span>
+                      </td>
+                      <td className="px-4 py-3">
+                        {guard.siteCode !== '—' ? (
+                          <Badge variant="outline" className="text-xs font-mono">{guard.siteCode}</Badge>
+                        ) : (
+                          <span className="text-sm text-slate-400">—</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className="text-sm text-slate-600">{guard.phone}</span>
+                      </td>
+                      <td className="px-4 py-3">
+                        <Badge className={`text-xs border-0 ${getRoleBadge(guard.role)}`}>
+                          {guard.role.replace(/_/g, ' ')}
+                        </Badge>
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className="text-sm text-slate-600">{guard.supervisor || <span className="text-slate-400">Unassigned</span>}</span>
+                      </td>
+                      <td className="px-4 py-3">
+                        <Badge variant="outline" className={`text-xs ${getStatusBadge(guard.status)}`}>
+                          {guard.status}
+                        </Badge>
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className="text-xs text-slate-500">{guard.joined}</span>
+                      </td>
+                      <td className="px-4 py-3 text-right">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => handleEditGuard(guard)}
+                          className="text-slate-500 hover:text-teal-600 hover:bg-teal-50"
+                        >
+                          <Edit2 className="w-4 h-4" />
+                        </Button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           )}
         </Card>
+      </main>
 
-        <div className="mt-4 text-sm text-slate-600">
-          Showing {filteredGuards.length} of {totalGuards} guards
-        </div>
-      </div>
+      {/* Edit Guard Modal */}
+      <Dialog open={isModalOpen} onOpenChange={setIsModalOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-3">
+              {editingGuard && (
+                <>
+                  <div className={`w-10 h-10 rounded-full flex items-center justify-center text-white text-sm font-medium ${getAvatarColor(editingGuard.role)}`}>
+                    {getInitials(editingGuard.name)}
+                  </div>
+                  <div>
+                    <p className="text-lg font-semibold">{editingGuard.name}</p>
+                    <p className="text-sm text-slate-500 font-normal">{editingGuard.code}</p>
+                  </div>
+                </>
+              )}
+            </DialogTitle>
+          </DialogHeader>
 
-      {isModalOpen && editingGuard && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <Card className="w-full max-w-md">
-            <div className="p-6">
-              <h2 className="text-xl font-bold text-slate-900 mb-6">Edit Guard</h2>
-
-              <div className="space-y-4 mb-6">
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-2">
-                    Supervisor Assignment
-                  </label>
-                  <select
-                    value={formValues.supervisor || ''}
-                    onChange={(e) =>
-                      setFormValues({ ...formValues, supervisor: e.target.value })
-                    }
-                    className="w-full px-3 py-2 border border-slate-300 rounded-md text-sm text-slate-900"
-                  >
-                    <option value="">Select supervisor</option>
-                    {supervisorList.map((s) => (
-                      <option key={s.id} value={s.id}>
-                        {s.full_name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <label className="flex items-center gap-2 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={formValues.isActive || false}
-                    onChange={(e) =>
-                      setFormValues({ ...formValues, isActive: e.target.checked })
-                    }
-                    className="w-4 h-4 rounded border-slate-300"
-                  />
-                  <span className="text-sm text-slate-700">Is Active</span>
-                </label>
-              </div>
-
-              <div className="flex justify-end gap-3">
-                <Button
-                  variant="outline"
-                  onClick={() => setIsModalOpen(false)}
-                  className="text-slate-700 border-slate-300"
-                >
-                  Cancel
-                </Button>
-                <Button
-                  onClick={handleSaveGuard}
-                  disabled={saving}
-                  className="bg-slate-700 hover:bg-slate-800"
-                >
-                  {saving ? 'Saving...' : 'Save'}
-                </Button>
-              </div>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label>Supervisor Assignment</Label>
+              <Select
+                value={formValues.supervisor}
+                onValueChange={(value) => setFormValues({ ...formValues, supervisor: value })}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select supervisor" />
+                </SelectTrigger>
+                <SelectContent>
+                  {supervisorList.map((s) => (
+                    <SelectItem key={s.id} value={s.id}>{s.full_name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
-          </Card>
-        </div>
-      )}
-    </>
+
+            <div className="flex items-center gap-3 p-3 bg-slate-50 rounded-lg">
+              <Checkbox
+                id="is-active"
+                checked={formValues.isActive}
+                onCheckedChange={(checked) => setFormValues({ ...formValues, isActive: !!checked })}
+              />
+              <Label htmlFor="is-active" className="text-sm cursor-pointer">
+                Guard is active and can be assigned to shifts
+              </Label>
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsModalOpen(false)}>
+              Cancel
+            </Button>
+            <Button onClick={handleSaveGuard} disabled={saving} className="bg-teal-600 hover:bg-teal-700">
+              {saving ? 'Saving...' : 'Save Changes'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
   )
 }
