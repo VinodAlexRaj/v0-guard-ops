@@ -462,19 +462,10 @@ export default function ManagerSchedulerPage() {
       })
       if (overlaps) { alert('Guard already assigned to another shift at this time.'); return }
 
-      // Extract time portion if start_time/end_time are full timestamps
-      const extractTime = (timeVal: string): string => {
-        if (timeVal.includes('T')) {
-          const timePart = timeVal.split('T')[1]
-          return timePart.replace(/[+-]\d{2}:\d{2}$/, '')
-        }
-        return timeVal
-      }
-
       const { error } = await supabase.from('shift_assignments').insert({
         roster_slot_id: fullSlot.id, site_id: selectedSiteId,
-        guard_id: selectedGuard.id, start_time: extractTime(fullSlot.start_time),
-        end_time: extractTime(fullSlot.end_time), assignment_type: 'planned',
+        guard_id: selectedGuard.id, start_time: fullSlot.start_time,
+        end_time: fullSlot.end_time, assignment_type: 'planned',
         reason: null, is_cancelled: false,
       })
       if (error) { alert(parseTriggerError(error.message)); return }
