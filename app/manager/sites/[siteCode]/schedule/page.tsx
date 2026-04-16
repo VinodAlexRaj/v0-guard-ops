@@ -594,8 +594,10 @@ export default function ManagerSchedulePage() {
         otherSlots = (otherSlotsData || []) as Slot[]
       }
 
-      const newStart = combineDateAndTime(fullSlot.shift_date, fullSlot.start_time)
-      const newEnd = combineDateAndTime(fullSlot.shift_date, fullSlot.end_time)
+      // fullSlot.start_time and end_time are already full timestamptz from the database
+      // No need to combine with shift_date — use them directly
+      const newStart = new Date(fullSlot.start_time)
+      const newEnd = new Date(fullSlot.end_time)
       if (newEnd <= newStart) {
         newEnd.setDate(newEnd.getDate() + 1)
       }
@@ -603,13 +605,13 @@ export default function ManagerSchedulePage() {
       const overlaps = otherSlots.some((slot) => {
         if (slot.id === fullSlot.id) return false
 
-        const slotStart = combineDateAndTime(slot.shift_date, slot.start_time)
-        const slotEnd = combineDateAndTime(slot.shift_date, slot.end_time)
+        const slotStart = new Date(slot.start_time)
+        const slotEnd = new Date(slot.end_time)
         if (slotEnd <= slotStart) {
           slotEnd.setDate(slotEnd.getDate() + 1)
         }
 
-        return slotStart < newEnd && slotEnd > newStart
+        return !(newEnd <= slotStart || newStart >= slotEnd)
       })
 
       if (overlaps) {
@@ -617,13 +619,8 @@ export default function ManagerSchedulePage() {
         return
       }
 
-      console.log('[v0] fullSlot data:', {
-        id: fullSlot.id,
-        shift_date: fullSlot.shift_date,
-        start_time: fullSlot.start_time,
-        end_time: fullSlot.end_time,
-      })
-
+      // fullSlot.start_time and end_time are already full timestamps from the database
+      // No need to combine with shift_date — use them directly as-is
       const { error } = await supabase.from('shift_assignments').insert({
         roster_slot_id: fullSlot.id,
         site_id: siteUUID,

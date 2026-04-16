@@ -594,8 +594,8 @@ export default function SchedulePage() {
         otherSlots = (otherSlotsData || []) as Slot[]
       }
 
-      const newStart = combineDateAndTime(fullSlot.shift_date, fullSlot.start_time)
-      const newEnd = combineDateAndTime(fullSlot.shift_date, fullSlot.end_time)
+      const newStart = new Date(fullSlot.start_time)
+      const newEnd = new Date(fullSlot.end_time)
       if (newEnd <= newStart) {
         newEnd.setDate(newEnd.getDate() + 1)
       }
@@ -603,13 +603,13 @@ export default function SchedulePage() {
       const overlaps = otherSlots.some((slot) => {
         if (slot.id === fullSlot.id) return false
 
-        const slotStart = combineDateAndTime(slot.shift_date, slot.start_time)
-        const slotEnd = combineDateAndTime(slot.shift_date, slot.end_time)
+        const slotStart = new Date(slot.start_time)
+        const slotEnd = new Date(slot.end_time)
         if (slotEnd <= slotStart) {
           slotEnd.setDate(slotEnd.getDate() + 1)
         }
 
-        return slotStart < newEnd && slotEnd > newStart
+        return !(newEnd <= slotStart || newStart >= slotEnd)
       })
 
       if (overlaps) {
