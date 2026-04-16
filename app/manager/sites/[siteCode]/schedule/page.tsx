@@ -630,30 +630,39 @@ export default function ManagerSchedulePage() {
         return
       }
 
-console.log('saveAssignment:')
-console.log('  selectedSlot.id:', selectedSlot?.id)
-console.log('  fullSlot.id:', fullSlot?.id)
-console.log('  fullSlot.shift_date:', fullSlot?.shift_date)
-console.log('  fullSlot.start_time:', fullSlot?.start_time)
-console.log('  fullSlot.end_time:', fullSlot?.end_time)
+      console.log('saveAssignment:')
+      console.log('  selectedSlot.id:', selectedSlot?.id)
+      console.log('  fullSlot.id:', fullSlot?.id)
+      console.log('  fullSlot.shift_date:', fullSlot?.shift_date)
+      console.log('  fullSlot.start_time:', fullSlot?.start_time)
+      console.log('  fullSlot.end_time:', fullSlot?.end_time)
 
-// fullSlot.start_time and end_time are already full timestamps from the database
-// No need to combine with shift_date — use them directly as-is
-const result = await supabase.from('shift_assignments').insert({
-  roster_slot_id: fullSlot.id,
-  site_id: siteUUID,
-  guard_id: selectedGuard.id,
-  start_time: fullSlot.start_time,
-  end_time: fullSlot.end_time,
-  assignment_type: 'planned',
-  reason: null,
-  is_cancelled: false,
-})
+      console.log('About to insert:')
+      console.log('  roster_slot_id:', fullSlot.id)
+      console.log('  site_id:', siteUUID)
+      console.log('  guard_id:', selectedGuard.id)
+      console.log('  start_time (raw):', fullSlot.start_time)
+      console.log('  start_time (type):', typeof fullSlot.start_time)
+      console.log('  end_time (raw):', fullSlot.end_time)
+      console.log('  end_time (type):', typeof fullSlot.end_time)
 
-if (result.error) {
-  alert(parseTriggerError(result.error.message))
-  return
-}
+      // fullSlot.start_time and end_time are already full timestamps from the database
+      // No need to combine with shift_date — use them directly as-is
+      const result = await supabase.from('shift_assignments').insert({
+        roster_slot_id: fullSlot.id,
+        site_id: siteUUID,
+        guard_id: selectedGuard.id,
+        start_time: fullSlot.start_time,
+        end_time: fullSlot.end_time,
+        assignment_type: 'planned',
+        reason: null,
+        is_cancelled: false,
+      })
+
+      if (result.error) {
+        alert(parseTriggerError(result.error.message))
+        return
+      }
 
       setSelectedGuard(null)
       setSearchQuery('')
