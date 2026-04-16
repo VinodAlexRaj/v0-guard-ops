@@ -151,7 +151,7 @@ export default function GuardsPage() {
         const guardsArray: Guard[] = (guardDetails || []).map(guard => {
           const guardLeaves = leaves?.filter(l => l.user_id === guard.id) || []
           const guardAssignments = allAssignments?.filter(a => a.guard_id === guard.id) || []
-          const siteCodes = [...new Set(guardAssignments.map(a => a.sites?.site_code).filter(Boolean))]
+          const siteCodes = [...new Set(guardAssignments.map(a => a.sites?.[0]?.site_code).filter(Boolean))]
 
           // Check if guard is on leave today
           const leavesToday = guardLeaves.filter(l => l.leave_date === today)
