@@ -549,9 +549,6 @@ export default function ManagerSchedulePage() {
       setSaving(true)
 
       const fullSlot = slotsRef.current.find((s) => s.id === selectedSlot.id)
-      console.log('[v0] selectedSlot:', selectedSlot)
-      console.log('[v0] fullSlot found:', fullSlot)
-      console.log('[v0] slotsRef.current:', slotsRef.current)
       if (!fullSlot) {
         alert('No valid roster slot exists for this cell.')
         return
@@ -620,17 +617,25 @@ export default function ManagerSchedulePage() {
         return
       }
 
+      // Extract time portion if start_time/end_time are full timestamps (e.g. '2026-04-17T19:00:00+08:00' -> '19:00:00')
+      const extractTime = (timeVal: string): string => {
+        if (timeVal.includes('T')) {
+          const timePart = timeVal.split('T')[1]
+          return timePart.replace(/[+-]\d{2}:\d{2}$/, '') // Remove timezone offset
+        }
+        return timeVal
+      }
+
       const insertPayload = {
         roster_slot_id: fullSlot.id,
         site_id: siteUUID,
         guard_id: selectedGuard.id,
-        start_time: fullSlot.start_time,
-        end_time: fullSlot.end_time,
+        start_time: extractTime(fullSlot.start_time),
+        end_time: extractTime(fullSlot.end_time),
         assignment_type: 'planned',
         reason: null,
         is_cancelled: false,
       }
-      console.log('[v0] insert payload:', insertPayload)
       const { error } = await supabase.from('shift_assignments').insert(insertPayload)
 
       if (error) {
