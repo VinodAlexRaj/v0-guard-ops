@@ -77,6 +77,114 @@ const emptyForm: ShiftFormValues = {
   is_active: true,
 }
 
+function normalizeTime(time: string | null | undefined): string {
+  if (!time) return ''
+  return time.slice(0, 5)
+}
+
+function toMinutes(time: string | null | undefined): number | null {
+  const normalized = normalizeTime(time)
+  if (!normalized || !normalized.includes(':')) return null
+  const [hh, mm] = normalized.split(':').map(Number)
+  if (Number.isNaN(hh) || Number.isNaN(mm)) return null
+  return hh * 60 + mm
+}
+
+function isOvernightShift(startTime: string | null | undefined, endTime: string | null | undefined): boolean {
+  const start = toMinutes(startTime)
+  const end = toMinutes(endTime)
+  if (start === null || end === null) return false
+  return end <= start
+}
+
+function formatTime(time: string | null) {
+  if (!time) return '-'
+  return normalizeTime(time)
+}
+
+function formatDate(date: string | null) {
+  if (!date) return '-'
+  return new Date(date).toLocaleDateString('en-GB', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+  })
+}
+
+function formatDays(days: number[] | null) {
+  if (!days || days.length === 0) return '-'
+
+  const sorted = [...days].sort((a, b) => a - b)
+  const joined = sorted.join(',')
+
+  if (joined === '1,2,3,4,5,6,7') return 'Daily'
+  if (joined === '1,2,3,4,5') return 'Weekdays'
+  if (joined === '6,7') return 'Weekends'
+
+  const map: Record<number, string> = {
+    1: 'Mon',
+    2: 'Tue',
+    3: 'Wed',
+    4: 'Thu',
+    5: 'Fri',
+    6: 'Sat',
+    7: 'Sun',
+  }
+
+  return sorted.map((d) => map[d]).join(', ')
+}
+
+function getTypeBadgeColor(type: string | null) {
+  switch ((type || '').toLowerCase()) {
+    case 'contract':
+      return 'bg-green-100 text-green-700 border-0'
+    case 'training':
+      return 'bg-blue-100 text-blue-700 border-0'
+    case 'temporary':
+      return 'bg-amber-100 text-amber-700 border-0'
+    case 'replacement':
+      return 'bg-rose-100 text-rose-700 border-0'
+    case 'internal':
+      return 'bg-purple-100 text-purple-700 border-0'
+    default:
+      return 'bg-slate-100 text-slate-700 border-0'
+  }
+}
+
+function formatTypeLabel(type: string | null) {
+  if (!type) return 'Other'
+  return type.charAt(0).toUpperCase() + type.slice(1)
+}
+
+function sortDays(days: number[]) {
+  return [...days].sort((a, b) => a - b)
+}
+
+function sameDays(a: number[] | null | undefined, b: number[] | null | undefined) {
+  const left = sortDays(a || [])
+  const right = sortDays(b || [])
+  if (left.length !== right.length) return false
+  return left.every((value, index) => value === right[index])
+}
+
+function parseShiftSaveError(message: string) {
+  const lower = message.toLowerCase()
+
+  if (lower.includes('cannot modify shift: assigned slots exist')) {
+    return 'This shift cannot be edited because assigned roster slots already exist. Remove those future assignments first.'
+  }
+
+  if (lower.includes('assigned slots exist')) {
+    return 'This change is blocked because assigned roster slots already exist. Remove those future assignments first.'
+  }
+
+  if (lower.includes('duplicate') || lower.includes('already exists')) {
+    return 'A similar shift template already exists for this site.'
+  }
+
+  return message || 'Failed to save shift.'
+}
+
 export default function ShiftsPage() {
   const router = useRouter()
 
@@ -85,6 +193,7 @@ export default function ShiftsPage() {
 
   const [sites, setSites] = useState<Site[]>([])
   const [shifts, setShifts] = useState<Shift[]>([])
+  const [managerName, setManagerName] = useState('Manager')
 
   const [selectedSiteCode, setSelectedSiteCode] = useState('')
   const [searchQuery, setSearchQuery] = useState('')
@@ -106,9 +215,29 @@ export default function ShiftsPage() {
     router.push('/')
   }
 
+  const loadCurrentUser = async () => {
+    const {
+      data: { user },
+    } = await supabase.auth.getUser()
+
+    if (!user) return
+
+    const { data, error } = await supabase
+      .from('users')
+      .select('full_name')
+      .eq('id', user.id)
+      .single()
+
+    if (!error && data?.full_name) {
+      setManagerName(data.full_name)
+    }
+  }
+
   const loadData = async () => {
     try {
       setLoading(true)
+
+      await loadCurrentUser()
 
       const { data: sitesData, error: sitesError } = await supabase
         .from('sites')
@@ -136,7 +265,10 @@ export default function ShiftsPage() {
           created_at,
           updated_at
         `)
+        .order('site_id')
         .order('start_time')
+        .order('shift_code')
+        .order('shift_name')
 
       if (shiftsError) throw shiftsError
 
@@ -178,67 +310,6 @@ export default function ShiftsPage() {
     return shifts.filter((shift) => shift.site_id === selectedSite.id)
   }, [shifts, selectedSite])
 
-  const getTypeBadgeColor = (type: string | null) => {
-    switch ((type || '').toLowerCase()) {
-      case 'contract':
-        return 'bg-green-100 text-green-700 border-0'
-      case 'training':
-        return 'bg-blue-100 text-blue-700 border-0'
-      case 'temporary':
-        return 'bg-amber-100 text-amber-700 border-0'
-      case 'replacement':
-        return 'bg-rose-100 text-rose-700 border-0'
-      default:
-        return 'bg-slate-100 text-slate-700 border-0'
-    }
-  }
-
-  const formatTypeLabel = (type: string | null) => {
-    if (!type) return 'Other'
-    return type.charAt(0).toUpperCase() + type.slice(1)
-  }
-
-  const formatDays = (days: number[] | null) => {
-    if (!days || days.length === 0) return '-'
-
-    const sorted = [...days].sort((a, b) => a - b)
-    const joined = sorted.join(',')
-
-    if (joined === '1,2,3,4,5,6,7') return 'Daily'
-    if (joined === '1,2,3,4,5') return 'Weekdays'
-    if (joined === '6,7') return 'Weekends'
-
-    const map: Record<number, string> = {
-      1: 'Mon',
-      2: 'Tue',
-      3: 'Wed',
-      4: 'Thu',
-      5: 'Fri',
-      6: 'Sat',
-      7: 'Sun',
-    }
-
-    return sorted.map((d) => map[d]).join(', ')
-  }
-
-  const formatTime = (time: string | null) => {
-    if (!time) return '-'
-    return time.slice(0, 5)
-  }
-
-  const formatDate = (date: string | null) => {
-    if (!date) return '-'
-    return new Date(date).toLocaleDateString('en-GB', {
-      day: '2-digit',
-      month: 'short',
-      year: 'numeric',
-    })
-  }
-
-  const isOvernightShift = (startTime: string, endTime: string) => {
-    return endTime < startTime
-  }
-
   const handleFormChange = <K extends keyof ShiftFormValues>(
     field: K,
     value: ShiftFormValues[K]
@@ -273,8 +344,8 @@ export default function ShiftsPage() {
     setFormValues({
       shift_name: shift.shift_name || '',
       shift_code: shift.shift_code || '',
-      start_time: shift.start_time || '',
-      end_time: shift.end_time || '',
+      start_time: normalizeTime(shift.start_time),
+      end_time: normalizeTime(shift.end_time),
       required_headcount: shift.required_headcount || 1,
       start_date: shift.start_date || '',
       end_date: shift.end_date || '',
@@ -283,7 +354,6 @@ export default function ShiftsPage() {
       type: shift.type || 'contract',
       is_active: shift.is_active ?? true,
     })
-    setEditingShift(shift)
     setIsEditModalOpen(true)
   }
 
@@ -330,8 +400,45 @@ export default function ShiftsPage() {
     return true
   }
 
+  const hasDuplicateShiftTemplate = () => {
+    if (!selectedSite) return false
+
+    return selectedShifts.some((shift) => {
+      if (!isAddMode && editingShift && shift.id === editingShift.id) return false
+
+      return (
+        shift.site_id === selectedSite.id &&
+        shift.shift_code?.trim().toLowerCase() === formValues.shift_code.trim().toLowerCase() &&
+        normalizeTime(shift.start_time) === normalizeTime(formValues.start_time) &&
+        normalizeTime(shift.end_time) === normalizeTime(formValues.end_time) &&
+        (shift.start_date || '') === formValues.start_date &&
+        (shift.end_date || '') === formValues.end_date &&
+        sameDays(shift.days_of_week, formValues.days_of_week)
+      )
+    })
+  }
+
+  const hasStructuralChanges = () => {
+    if (!editingShift) return false
+
+    return (
+      editingShift.site_id !== selectedSite?.id ||
+      normalizeTime(editingShift.start_time) !== normalizeTime(formValues.start_time) ||
+      normalizeTime(editingShift.end_time) !== normalizeTime(formValues.end_time) ||
+      (editingShift.start_date || '') !== formValues.start_date ||
+      (editingShift.end_date || '') !== formValues.end_date ||
+      !sameDays(editingShift.days_of_week, formValues.days_of_week) ||
+      (editingShift.is_active ?? true) !== formValues.is_active
+    )
+  }
+
   const handleSaveShift = async () => {
     if (!validateForm() || !selectedSite) return
+
+    if (hasDuplicateShiftTemplate()) {
+      alert('A similar shift template already exists for this site.')
+      return
+    }
 
     try {
       setSaving(true)
@@ -340,12 +447,12 @@ export default function ShiftsPage() {
         site_id: selectedSite.id,
         shift_name: formValues.shift_name.trim(),
         shift_code: formValues.shift_code.trim(),
-        start_time: formValues.start_time,
-        end_time: formValues.end_time,
+        start_time: normalizeTime(formValues.start_time),
+        end_time: normalizeTime(formValues.end_time),
         required_headcount: Number(formValues.required_headcount),
         start_date: formValues.start_date,
         end_date: formValues.end_date,
-        days_of_week: formValues.days_of_week,
+        days_of_week: sortDays(formValues.days_of_week),
         is_chargeable: formValues.is_chargeable,
         type: formValues.type.toLowerCase(),
         is_active: formValues.is_active,
@@ -375,7 +482,7 @@ export default function ShiftsPage() {
       closeModal()
     } catch (error: any) {
       console.error('[shifts] Error saving shift:', error)
-      alert(error?.message || 'Failed to save shift.')
+      alert(parseShiftSaveError(error?.message || 'Failed to save shift.'))
     } finally {
       setSaving(false)
     }
@@ -396,7 +503,7 @@ export default function ShiftsPage() {
           <div className="text-sm text-slate-600">{dateStr}</div>
           <div className="flex items-center gap-4">
             <div className="text-right">
-              <p className="text-sm font-medium text-slate-900">Vinod Alex Raj</p>
+              <p className="text-sm font-medium text-slate-900">{managerName}</p>
               <Badge variant="secondary" className="mt-1">
                 Manager
               </Badge>
@@ -451,9 +558,7 @@ export default function ShiftsPage() {
                         {activeCount} active / {totalCount} total
                       </div>
                     </div>
-                    <Badge variant="secondary">
-                      {activeCount}/{totalCount}
-                    </Badge>
+                    <Badge variant="secondary">{activeCount}/{totalCount}</Badge>
                   </div>
                 </button>
               )
@@ -621,7 +726,13 @@ export default function ShiftsPage() {
         </div>
       </div>
 
-      <Dialog open={isEditModalOpen} onOpenChange={setIsEditModalOpen}>
+      <Dialog
+        open={isEditModalOpen}
+        onOpenChange={(open) => {
+          setIsEditModalOpen(open)
+          if (!open) closeModal()
+        }}
+      >
         <DialogContent className="w-full max-w-5xl p-0 sm:max-w-5xl">
           <DialogHeader className="border-b border-slate-200 px-8 py-6">
             <DialogTitle className="text-xl font-bold text-slate-900">
@@ -630,6 +741,20 @@ export default function ShiftsPage() {
           </DialogHeader>
 
           <div className="max-h-[80vh] overflow-y-auto px-8 py-6">
+            {!isAddMode && editingShift && hasStructuralChanges() && (
+              <div className="mb-6 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+                Editing time, recurrence, date range, or active status affects generated roster slots.
+                This save will be blocked if assigned future slots already exist.
+              </div>
+            )}
+
+            {!isAddMode && editingShift && !hasStructuralChanges() && (
+              <div className="mb-6 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
+                Name, code, type, chargeable, and headcount changes are lower risk. Changes to
+                schedule pattern, date range, or active status are protected by backend rules.
+              </div>
+            )}
+
             <div className="grid grid-cols-1 gap-8 lg:grid-cols-2">
               <div className="space-y-6">
                 <div>
@@ -727,6 +852,12 @@ export default function ShiftsPage() {
                         />
                       </div>
                     </div>
+
+                    {isOvernightShift(formValues.start_time, formValues.end_time) && (
+                      <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+                        This is an overnight shift. It starts on one day and ends on the next day.
+                      </div>
+                    )}
 
                     <div>
                       <label className="mb-2 block text-sm font-medium text-slate-700">
