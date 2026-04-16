@@ -200,7 +200,7 @@ export default function ManagerOverviewPage() {
     }
 
     fetchOverviewData()
-  }, [router])
+  }, [])
 
   const getFillRateColor = (rate: number) => {
     if (rate >= 80) return 'bg-green-50 text-green-700 border-green-200'

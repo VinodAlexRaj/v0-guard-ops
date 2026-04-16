@@ -26,13 +26,20 @@ import { supabase } from '@/lib/supabase/client'
 import { getLocalDateString } from '@/lib/utils'
 
 interface SiteRow {
+  siteId: string
   code: string
   name: string
   supervisor: string
+  supervisorId: string | null
   activeShifts: number
   fillRate: number
   openSlots: number
   status: string
+}
+
+interface SupervisorUser {
+  id: string
+  name: string
 }
 
 export default function ManagerSitesPage() {
@@ -57,6 +64,26 @@ export default function ManagerSitesPage() {
   const [newSiteSupervisor, setNewSiteSupervisor] = useState('')
   const [supervisorList, setSupervisorList] = useState<{ id: string; name: string }[]>([])
   const [saving, setSaving] = useState(false)
+
+  const [showAddSite, setShowAddSite] = useState(false)
+  const [newSiteCode, setNewSiteCode] = useState('')
+  const [newSiteName, setNewSiteName] = useState('')
+  const [newSiteAddress, setNewSiteAddress] = useState('')
+  const [addSiteLoading, setAddSiteLoading] = useState(false)
+  const [addSiteError, setAddSiteError] = useState('')
+
+  const [supervisorUsers, setSupervisorUsers] = useState<SupervisorUser[]>([])
+  const [showAssignSupervisor, setShowAssignSupervisor] = useState(false)
+  const [assigningSite, setAssigningSite] = useState<SiteRow | null>(null)
+  const [selectedSupervisorId, setSelectedSupervisorId] = useState('')
+  const [assignLoading, setAssignLoading] = useState(false)
+  const [assignError, setAssignError] = useState('')
+
+  // Bulk selection
+  const [selectedSiteIds, setSelectedSiteIds] = useState<Set<string>>(new Set())
+  const [bulkSupervisorId, setBulkSupervisorId] = useState('')
+  const [bulkLoading, setBulkLoading] = useState(false)
+  const [bulkError, setBulkError] = useState('')
 
   const handleSignOut = () => {
     router.push('/')
@@ -151,111 +178,129 @@ export default function ManagerSitesPage() {
   }, [])
 
   // Fetch real data from Supabase
-  useEffect(() => {
-    const fetchSitesData = async () => {
-      try {
-        setLoading(true)
+  const fetchSites = async () => {
+    try {
+      setLoading(true)
 
-        // FETCH 1 — Get all sites
-        const { data: sites } = await supabase
-          .from('sites')
-          .select('id, site_code, name, address')
+      // FETCH 1 — Get all sites
+      const { data: sites } = await supabase
+        .from('sites')
+        .select('id, site_code, name, address')
 
-        if (!sites || sites.length === 0) {
-          setLoading(false)
-          return
-        }
-
-        const siteIds = sites.map(s => s.id)
-
-        // Get current manager name
-        const { data: { user } } = await supabase.auth.getUser()
-        if (user) {
-          const { data: userData } = await supabase
-            .from('users')
-            .select('full_name')
-            .eq('id', user.id)
-            .single()
-          if (userData?.full_name) setManagerName(userData.full_name)
-        }
-
-        // FETCH 2 — Get today's coverage
-        const today = getLocalDateString()
-        const { data: coverage } = await supabase
-          .from('roster_coverage')
-          .select('site_id, assigned, required_headcount')
-          .in('site_id', siteIds)
-          .eq('shift_date', today)
-
-        // FETCH 3 — Get shift definitions count per site
-        const { data: shiftDefs } = await supabase
-          .from('shift_definitions')
-          .select('id, site_id')
-          .in('site_id', siteIds)
-          .eq('is_active', true)
-
-        // FETCH 4 — Get supervisor assignments
-        const { data: supSites } = await supabase
-          .from('supervisor_sites')
-          .select('supervisor_id, site_id, users(full_name)')
-
-        // BUILD TABLE ROWS
-        const covData = coverage || []
-        const shiftData = shiftDefs || []
-        const supData = supSites || []
-
-        const rows: SiteRow[] = sites.map(site => {
-          const siteCov = covData.filter(c => c.site_id === site.id)
-          const totalRequired = siteCov.reduce((sum, c) => sum + c.required_headcount, 0)
-          const totalAssigned = siteCov.reduce((sum, c) => sum + c.assigned, 0)
-          const fillRate = totalRequired > 0 ? Math.round((totalAssigned / totalRequired) * 100) : 100
-          const openSlots = Math.max(0, totalRequired - totalAssigned)
-
-          const activeShifts = shiftData.filter(sd => sd.site_id === site.id).length
-          const supervisorAssignment = supData.find(ss => ss.site_id === site.id)
-          const supervisor = supervisorAssignment?.users?.full_name || 'Unassigned'
-
-          return {
-            code: site.site_code,
-            name: site.name,
-            supervisor,
-            activeShifts: activeShifts || 0,
-            fillRate,
-            openSlots,
-            status: 'Active',
-          }
-        })
-
-        console.log('[v0] BUILT ROWS:', rows)
-        setAllSites(rows)
-
-        // Calculate summary stats
-        const gaps = rows.filter(r => r.openSlots > 0).length
-        const filled = rows.filter(r => r.openSlots === 0).length
-
-        setTotalSites(rows.length)
-        setSitesWithGaps(gaps)
-        setFullyFilled(filled)
-
-        // Extract unique supervisor names for filter
-        const uniqueSupervisors = ['All', ...new Set(rows.map(r => r.supervisor).filter(s => s !== 'Unassigned'))]
-        setSupervisors(uniqueSupervisors)
-      } catch (error) {
-        console.error('[v0] Error fetching sites:', error)
-      } finally {
+      if (!sites || sites.length === 0) {
         setLoading(false)
+        return
       }
-    }
 
-    fetchSitesData()
-  }, [router])
+      const siteIds = sites.map(s => s.id)
+
+      // Get current manager name
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) {
+        router.push('/')
+        return
+      }
+      const { data: userData } = await supabase
+        .from('users')
+        .select('full_name')
+        .eq('id', user.id)
+        .single()
+      if (userData?.full_name) setManagerName(userData.full_name)
+
+      // FETCH 2 — Get today's coverage
+      const today = getLocalDateString()
+      const { data: coverage } = await supabase
+        .from('roster_coverage')
+        .select('site_id, assigned, required_headcount')
+        .in('site_id', siteIds)
+        .eq('shift_date', today)
+
+      // FETCH 3 — Get shift definitions count per site
+      const { data: shiftDefs } = await supabase
+        .from('shift_definitions')
+        .select('id, site_id')
+        .in('site_id', siteIds)
+        .eq('is_active', true)
+
+      // FETCH 4 — Get supervisor assignments
+      const { data: supSites } = await supabase
+        .from('supervisor_sites')
+        .select('supervisor_id, site_id, users(full_name)')
+
+      // FETCH 5 — Get all supervisors for assign dialog (via users_with_role)
+      const { data: supervisorRoles } = await supabase
+        .from('users_with_role')
+        .select('id')
+        .eq('role', 'supervisor')
+
+      const supervisorIds = (supervisorRoles || []).map(r => r.id)
+      if (supervisorIds.length > 0) {
+        const { data: supUsers } = await supabase
+          .from('users')
+          .select('id, full_name')
+          .in('id', supervisorIds)
+          .eq('is_active', true)
+          .order('full_name')
+        setSupervisorUsers((supUsers || []).map(u => ({ id: u.id, name: u.full_name })))
+      }
+
+      // BUILD TABLE ROWS
+      const covData = coverage || []
+      const shiftData = shiftDefs || []
+      const supData = supSites || []
+
+      const rows: SiteRow[] = sites.map(site => {
+        const siteCov = covData.filter(c => c.site_id === site.id)
+        const totalRequired = siteCov.reduce((sum, c) => sum + c.required_headcount, 0)
+        const totalAssigned = siteCov.reduce((sum, c) => sum + c.assigned, 0)
+        const fillRate = totalRequired > 0 ? Math.round((totalAssigned / totalRequired) * 100) : 100
+        const openSlots = Math.max(0, totalRequired - totalAssigned)
+
+        const activeShifts = shiftData.filter(sd => sd.site_id === site.id).length
+        const supervisorAssignment = supData.find(ss => ss.site_id === site.id)
+        const supervisor = supervisorAssignment?.users?.full_name || 'Unassigned'
+        const supervisorId = supervisorAssignment?.supervisor_id || null
+
+        return {
+          siteId: site.id,
+          code: site.site_code,
+          name: site.name,
+          supervisor,
+          supervisorId,
+          activeShifts: activeShifts || 0,
+          fillRate,
+          openSlots,
+          status: 'Active',
+        }
+      })
+
+      setAllSites(rows)
+
+      // Calculate summary stats
+      const gaps = rows.filter(r => r.openSlots > 0).length
+      const filled = rows.filter(r => r.openSlots === 0).length
+
+      setTotalSites(rows.length)
+      setSitesWithGaps(gaps)
+      setFullyFilled(filled)
+
+      // Extract unique supervisor names for filter
+      const uniqueSupervisors = ['All', ...new Set(rows.map(r => r.supervisor).filter(s => s !== 'Unassigned'))]
+      setSupervisors(uniqueSupervisors)
+    } catch (error) {
+      console.error('[v0] Error fetching sites:', error)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    fetchSites()
+  }, [])
 
   // Filter and search
   const filteredSites = useMemo(() => {
-    console.log('[v0] allSites:', allSites)
-    console.log('[v0] searchQuery:', searchQuery, 'supervisorFilter:', supervisorFilter, 'statusFilter:', statusFilter)
-    
-    const filtered = allSites.filter((site) => {
+    return allSites.filter((site) => {
       const matchesSearch =
         !searchQuery ||
         site.code.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -266,10 +311,13 @@ export default function ManagerSitesPage() {
 
       return matchesSearch && matchesSupervisor && matchesStatus
     })
-
-    console.log('[v0] filteredSites:', filtered)
-    return filtered
   }, [allSites, searchQuery, supervisorFilter, statusFilter])
+
+  const allFilteredSelected =
+    filteredSites.length > 0 && filteredSites.every(s => selectedSiteIds.has(s.siteId))
+  const someFilteredSelected =
+    filteredSites.some(s => selectedSiteIds.has(s.siteId)) && !allFilteredSelected
+  const anySelected = selectedSiteIds.size > 0
 
   const getFillRateColor = (rate: number) => {
     if (rate >= 80) return 'bg-green-100 text-green-700 border-0'
@@ -304,7 +352,7 @@ export default function ManagerSitesPage() {
       </header>
 
       {/* Page Content */}
-      <div className="p-8">
+      <div className={`p-8 ${anySelected ? 'pb-28' : ''}`}>
         {/* Header with Search */}
         <div className="mb-8 flex items-center justify-between">
           <div>
@@ -395,6 +443,13 @@ export default function ManagerSitesPage() {
             <table className="w-full">
               <thead className="bg-slate-50">
                 <tr className="border-slate-200">
+                  <th className="px-4 py-3 w-10">
+                    <Checkbox
+                      checked={someFilteredSelected ? 'indeterminate' : allFilteredSelected}
+                      onCheckedChange={() => toggleAll(filteredSites)}
+                      aria-label="Select all"
+                    />
+                  </th>
                   <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700">Site Code</th>
                   <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700">Site Name</th>
                   <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700">Supervisor</th>
@@ -406,7 +461,19 @@ export default function ManagerSitesPage() {
               </thead>
               <tbody>
                 {filteredSites.map((site, idx) => (
-                  <tr key={idx} className="border-b border-slate-200 hover:bg-slate-50">
+                  <tr
+                    key={idx}
+                    className={`border-b border-slate-200 hover:bg-slate-50 ${
+                      selectedSiteIds.has(site.siteId) ? 'bg-slate-100' : ''
+                    }`}
+                  >
+                    <td className="px-4 py-3">
+                      <Checkbox
+                        checked={selectedSiteIds.has(site.siteId)}
+                        onCheckedChange={() => toggleSite(site.siteId)}
+                        aria-label={`Select ${site.name}`}
+                      />
+                    </td>
                     <td className="px-4 py-3">
                       <span className="font-mono text-sm font-medium text-slate-900">{site.code}</span>
                     </td>
@@ -428,15 +495,26 @@ export default function ManagerSitesPage() {
                       <span className="text-sm text-slate-700">{site.openSlots}</span>
                     </td>
                     <td className="px-4 py-3">
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => handleViewSite(site.code)}
-                        className="text-slate-600 hover:text-slate-900"
-                      >
-                        View
-                        <ArrowRight className="w-4 h-4 ml-2" />
-                      </Button>
+                      <div className="flex items-center gap-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => handleOpenAssign(site)}
+                          className="text-slate-700 border-slate-300 hover:bg-slate-50"
+                        >
+                          <UserCheck className="w-3.5 h-3.5 mr-1.5" />
+                          {site.supervisor === 'Unassigned' ? 'Assign' : 'Reassign'}
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => handleViewSite(site.code)}
+                          className="text-slate-600 hover:text-slate-900"
+                        >
+                          View
+                          <ArrowRight className="w-4 h-4 ml-2" />
+                        </Button>
+                      </div>
                     </td>
                   </tr>
                 ))}

@@ -1,6 +1,7 @@
 'use client'
 
 import Link from 'next/link'
+import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -14,9 +15,39 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { LogOut, ChevronLeft } from 'lucide-react'
+import { supabase } from '@/lib/supabase/client'
 
 export default function SupervisorDetailPage() {
   const router = useRouter()
+  const [managerName, setManagerName] = useState('Manager')
+  const [dateStr, setDateStr] = useState('')
+
+  useEffect(() => {
+    const todayDate = new Date()
+    setDateStr(todayDate.toLocaleDateString('en-US', {
+      weekday: 'short',
+      month: 'short',
+      day: '2-digit',
+      year: 'numeric',
+    }))
+  }, [])
+
+  useEffect(() => {
+    const fetchManager = async () => {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) {
+        router.push('/')
+        return
+      }
+      const { data: userData } = await supabase
+        .from('users')
+        .select('full_name')
+        .eq('id', user.id)
+        .single()
+      if (userData?.full_name) setManagerName(userData.full_name)
+    }
+    fetchManager()
+  }, [])
 
   const handleSignOut = () => {
     router.push('/')
@@ -63,9 +94,6 @@ export default function SupervisorDetailPage() {
     return 'bg-slate-100 text-slate-700'
   }
 
-  const todayDate = new Date(2026, 3, 10)
-  const dateStr = todayDate.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: '2-digit', year: 'numeric' })
-
   return (
     <>
       {/* Top Navigation */}
@@ -74,7 +102,7 @@ export default function SupervisorDetailPage() {
           <div className="text-sm text-slate-600">{dateStr}</div>
           <div className="flex items-center gap-4">
             <div className="text-right">
-              <p className="text-sm font-medium text-slate-900">Vinod Alex Raj</p>
+              <p className="text-sm font-medium text-slate-900">{managerName}</p>
               <Badge variant="secondary" className="mt-1">
                 Manager
               </Badge>
