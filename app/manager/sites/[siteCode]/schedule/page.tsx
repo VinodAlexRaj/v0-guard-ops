@@ -75,6 +75,17 @@ interface SiteRecord {
   name?: string | null
 }
 
+interface CrossSiteAssignment {
+  id: string
+  guard_id: string
+  site_id: string
+  site_code: string
+  shift_date: string
+  shift_name: string
+  start_time: string
+  end_time: string
+}
+
 function getWeekStart(date: Date): Date {
   const d = new Date(date)
   const day = d.getDay()
@@ -110,16 +121,6 @@ function GuardListSkeleton() {
   )
 }
 
-function AssignedGuardsSkeleton() {
-  return (
-    <div className="space-y-2">
-      {[...Array(2)].map((_, i) => (
-        <div key={i} className="h-12 bg-slate-100 rounded animate-pulse" />
-      ))}
-    </div>
-  )
-}
-
 export default function ManagerSchedulePage() {
   const router = useRouter()
   const params = useParams()
@@ -145,12 +146,14 @@ export default function ManagerSchedulePage() {
   const [guardsDirectory, setGuardsDirectory] = useState<Guard[]>([])
   const [guardLeave, setGuardLeave] = useState<LeaveRecord[]>([])
   const [guardShiftCounts, setGuardShiftCounts] = useState<Map<string, Map<string, number>>>(new Map())
+  const [crossSiteAssignments, setCrossSiteAssignments] = useState<CrossSiteAssignment[]>([])
 
   const [siteUUID, setSiteUUID] = useState<string | null>(null)
   const [siteName, setSiteName] = useState('')
   const [managerName, setManagerName] = useState('Manager')
 
   const slotsRef = useRef<Slot[]>([])
+  const allSitesRef = useRef<Map<string, string>>(new Map()) // site_id -> site_code
 
   const currentDateStr = useMemo(() => formatDisplayDate(new Date()), [])
 
@@ -256,6 +259,72 @@ export default function ManagerSchedulePage() {
     setGuardsDirectory((guards || []) as Guard[])
   }, [])
 
+  const fetchAllSites = useCallback(async () => {
+    const { data: sitesData, error: sitesError } = await supabase
+      .from('sites')
+      .select('id, site_code')
+      .eq('is_active', true)
+
+    if (sitesError) throw sitesError
+
+    const siteMap = new Map<string, string>()
+      ; (sitesData || []).forEach((site: any) => {
+        siteMap.set(site.id, site.site_code)
+      })
+    allSitesRef.current = siteMap
+  }, [])
+
+  const fetchCrossSiteAssignments = useCallback(
+    async (startDate: string, endDate: string) => {
+      const { data: allAssignments, error: assignmentsError } = await supabase
+        .from('shift_assignments')
+        .select(
+          `
+          id,
+          guard_id,
+          roster_slot_id,
+          roster_slots!inner(
+            id,
+            shift_date,
+            site_id,
+            start_time,
+            end_time,
+            shift_definition_id,
+            shift_definitions!inner(shift_name)
+          )
+        `
+        )
+        .eq('is_cancelled', false)
+        .gte('roster_slots.shift_date', startDate)
+        .lte('roster_slots.shift_date', endDate)
+
+      if (assignmentsError) throw assignmentsError
+
+      const crossSite: CrossSiteAssignment[] = []
+        ; (allAssignments || []).forEach((assignment: any) => {
+          const roster = assignment.roster_slots
+          const shiftDef = roster?.shift_definitions
+          const site_id = roster?.site_id
+          const site_code = allSitesRef.current.get(site_id) || 'Unknown'
+
+          crossSite.push({
+            id: assignment.id,
+            guard_id: assignment.guard_id,
+            site_id,
+            site_code,
+            shift_date: roster?.shift_date || '',
+            shift_name: shiftDef?.shift_name || 'Shift',
+            start_time: roster?.start_time || '',
+            end_time: roster?.end_time || '',
+          })
+        })
+
+      console.log('[Schedule] Cross-site assignments fetched:', crossSite)
+      setCrossSiteAssignments(crossSite)
+    },
+    []
+  )
+
   const syncSelection = useCallback(
     (nextSlots: Slot[], nextShiftDefs: ShiftDefinition[]) => {
       if (nextSlots.length === 0) {
@@ -353,8 +422,11 @@ export default function ManagerSchedulePage() {
       setGuardLeave((leaveData || []) as LeaveRecord[])
       calculateGuardShiftCounts(assignmentsData, nextSlots)
       syncSelection(nextSlots, nextShiftDefs)
+
+      // Fetch cross-site assignments
+      await fetchCrossSiteAssignments(startDate, endDate)
     },
-    [calculateGuardShiftCounts, syncSelection, weekEnd, weekStartDate]
+    [calculateGuardShiftCounts, syncSelection, weekEnd, weekStartDate, fetchCrossSiteAssignments]
   )
 
   useEffect(() => {
@@ -394,7 +466,8 @@ export default function ManagerSchedulePage() {
         setSiteUUID(siteRecord.id)
         setSiteName(siteRecord.name || siteRecord.site_code)
 
-        await Promise.all([fetchSchedule(siteRecord.id), fetchGuards()])
+        await Promise.all([fetchAllSites(), fetchGuards()])
+        await fetchSchedule(siteRecord.id)
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Failed to load schedule'
         setError(message)
@@ -405,7 +478,7 @@ export default function ManagerSchedulePage() {
     }
 
     initializeData()
-  }, [fetchGuards, fetchSchedule, siteCode])
+  }, [fetchGuards, fetchSchedule, siteCode, fetchAllSites])
 
   useEffect(() => {
     if (!siteUUID) return
@@ -539,17 +612,6 @@ export default function ManagerSchedulePage() {
       if (status === 'absent') return 'bg-red-100 text-red-700 border-0 line-through'
     }
     return 'border-2 border-dashed border-slate-300 text-slate-500'
-  }
-
-  const getShiftNameForAssignment = (assignmentId: string): string | null => {
-    const assignment = assignments.find((a) => a.id === assignmentId)
-    if (!assignment) return null
-
-    const slot = slotsRef.current.find((s) => s.id === assignment.roster_slot_id)
-    if (!slot) return null
-
-    const shiftDef = shiftDefs.find((sd) => sd.id === slot.shift_definition_id)
-    return shiftDef?.shift_name || null
   }
 
   const parseErrorMessage = (message: string): string => {
@@ -841,7 +903,10 @@ export default function ManagerSchedulePage() {
                     </thead>
                     <tbody>
                       {shiftDefs.map((shiftDef, shiftIdx) => (
-                        <tr key={shiftDef.id} className="border-b border-slate-200 hover:bg-slate-50 transition-colors">
+                        <tr
+                          key={shiftDef.id}
+                          className="border-b border-slate-200 hover:bg-slate-50 transition-colors"
+                        >
                           <td className="px-4 py-3 text-sm font-semibold text-slate-900">
                             <div>{shiftDef.shift_name}</div>
                             <div className="text-xs text-slate-600">{shiftDef.shift_code}</div>
@@ -1020,12 +1085,18 @@ export default function ManagerSchedulePage() {
                     ) : (
                       filteredGuards
                         .filter((guard) => {
+                          // CRITICAL: Remove guards already assigned to THIS EXACT SLOT
                           const isAlreadyAssignedToThisSlot =
                             selectedSlot &&
                             assignments.some(
-                              (a) => a.guard_id === guard.id && a.roster_slot_id === selectedSlot.id
+                              (a) => a.guard_id === guard.id && a.roster_slot_id === selectedSlot.id && !a.is_cancelled
                             )
-                          return !isAlreadyAssignedToThisSlot
+
+                          if (isAlreadyAssignedToThisSlot) {
+                            console.log(`[Schedule] Filtering out ${guard.full_name} - already assigned to slot ${selectedSlot?.id}`)
+                            return false
+                          }
+                          return true
                         })
                         .map((guard) => {
                           const dateStr = selectedSlot
@@ -1036,52 +1107,128 @@ export default function ManagerSchedulePage() {
                             !!dateStr &&
                             guardLeave.some((leave) => guard.id === leave.user_id && leave.leave_date === dateStr)
 
-                          const assignmentOnOtherSlotToday =
-                            !!dateStr &&
-                            assignments.find((a) => {
-                              const slotDate = slotsRef.current.find((s) => s.id === a.roster_slot_id)?.shift_date
-                              const assignmentDateStr = slotDate
-                                ? getLocalDateString(new Date(slotDate))
-                                : null
+                          // Get all assignments on this date for this guard
+                          const assignmentsOnDate = dateStr
+                            ? crossSiteAssignments.filter(
+                              (a) => a.guard_id === guard.id && a.shift_date === dateStr
+                            )
+                            : []
 
-                              return (
-                                a.guard_id === guard.id &&
-                                assignmentDateStr === dateStr &&
-                                a.roster_slot_id !== selectedSlot?.id
-                              )
-                            })
+                          console.log(`[Schedule] Guard: ${guard.full_name}, Date: ${dateStr}, Assignments: ${assignmentsOnDate.length}`)
 
-                          const shiftNameForBadge = assignmentOnOtherSlotToday
-                            ? getShiftNameForAssignment(assignmentOnOtherSlotToday.id)
+                          // Check for TIME OVERLAPS with existing assignments
+                          const timeOverlapAssignment = selectedSlot
+                            ? (() => {
+                              const newStart = new Date(selectedSlot.start_time)
+                              const newEnd = new Date(selectedSlot.end_time)
+
+                              // Handle overnight shift: if end <= start, it's overnight
+                              if (newEnd <= newStart) {
+                                newEnd.setDate(newEnd.getDate() + 1)
+                              }
+
+                              console.log(`[Schedule] Checking overlap for ${guard.full_name}: ${newStart} - ${newEnd}`)
+
+                              // Find ANY assignment that overlaps in time
+                              const conflict = assignmentsOnDate.find((assignment) => {
+                                // Use times directly from assignment (now included in CrossSiteAssignment)
+                                const existingStart = new Date(assignment.start_time)
+                                const existingEnd = new Date(assignment.end_time)
+
+                                // Handle overnight shift
+                                if (existingEnd <= existingStart) {
+                                  existingEnd.setDate(existingEnd.getDate() + 1)
+                                }
+
+                                // Check if times overlap: !(newEnd <= existingStart || newStart >= existingEnd)
+                                const overlaps = !(newEnd <= existingStart || newStart >= existingEnd)
+
+                                console.log(
+                                  `[Schedule] ${assignment.site_code}:${assignment.shift_name} | Existing: ${existingStart} - ${existingEnd} | Overlap: ${overlaps}`
+                                )
+
+                                return overlaps
+                              })
+
+                              if (conflict) {
+                                console.log(`[Schedule] CONFLICT FOUND: ${conflict.site_code}:${conflict.shift_name}`)
+                              }
+                              return conflict
+                            })()
                             : null
 
-                          const isDisabled = isOnLeave
+                          const isDisabled = isOnLeave || !!timeOverlapAssignment
                           const isSelected = selectedGuard?.id === guard.id
 
                           return (
-                            <button
-                              key={guard.id}
-                              onClick={() => !isDisabled && setSelectedGuard(guard)}
-                              disabled={isDisabled}
-                              className={`w-full text-left px-3 py-2 rounded text-sm font-medium transition-all ${isDisabled
-                                  ? 'bg-slate-100 text-slate-400 cursor-not-allowed'
-                                  : isSelected
-                                    ? 'bg-teal-50 text-teal-700 border-2 border-teal-300 shadow-sm'
-                                    : 'bg-slate-50 text-slate-700 hover:bg-slate-100 border border-slate-200'
-                                }`}
-                            >
-                              <div className="flex items-center justify-between gap-2">
-                                <span>{guard.full_name}</span>
-                                <div className="flex items-center gap-2">
-                                  {shiftNameForBadge && !isDisabled && (
-                                    <Badge className="bg-teal-500 text-white text-xs">
-                                      Assigned: {shiftNameForBadge}
-                                    </Badge>
-                                  )}
-                                  {isOnLeave && <span className="text-xs text-red-600">(on leave)</span>}
+                            <div key={guard.id}>
+                              <button
+                                onClick={() => {
+                                  if (isOnLeave) {
+                                    toast.error(`${guard.full_name} is on approved leave on ${dateStr}`)
+                                    return
+                                  }
+                                  if (timeOverlapAssignment) {
+                                    toast.error(
+                                      `${guard.full_name} is already assigned to ${timeOverlapAssignment.shift_name} at ${timeOverlapAssignment.site_code} at an overlapping time. Cannot double-book.`
+                                    )
+                                    return
+                                  }
+                                  setSelectedGuard(guard)
+                                }}
+                                className={`w-full text-left px-3 py-2 rounded text-sm font-medium transition-all ${isDisabled
+                                    ? 'bg-slate-100 text-slate-400 cursor-not-allowed opacity-50'
+                                    : isSelected
+                                      ? 'bg-teal-50 text-teal-700 border-2 border-teal-300 shadow-sm'
+                                      : 'bg-slate-50 text-slate-700 hover:bg-slate-100 border border-slate-200'
+                                  }`}
+                              >
+                                <div className="flex items-center justify-between gap-2">
+                                  <span>{guard.full_name}</span>
+                                  <div className="flex items-center gap-2">
+                                    {assignmentsOnDate.length > 0 && (
+                                      <div className="flex gap-1 flex-wrap justify-end">
+                                        {assignmentsOnDate.map((assignment, idx) => {
+                                          // Check if THIS specific assignment overlaps in time
+                                          const hasTimeConflict = selectedSlot
+                                            ? (() => {
+                                              const newStart = new Date(selectedSlot.start_time)
+                                              const newEnd = new Date(selectedSlot.end_time)
+                                              if (newEnd <= newStart) {
+                                                newEnd.setDate(newEnd.getDate() + 1)
+                                              }
+
+                                              // Use times directly from assignment
+                                              const existingStart = new Date(assignment.start_time)
+                                              const existingEnd = new Date(assignment.end_time)
+                                              if (existingEnd <= existingStart) {
+                                                existingEnd.setDate(existingEnd.getDate() + 1)
+                                              }
+
+                                              // Check if times overlap
+                                              return !(newEnd <= existingStart || newStart >= existingEnd)
+                                            })()
+                                            : false
+
+                                          return (
+                                            <Badge
+                                              key={idx}
+                                              className={`text-xs whitespace-nowrap border-0 ${hasTimeConflict
+                                                  ? 'bg-red-100 text-red-700 font-semibold'
+                                                  : 'bg-yellow-100 text-yellow-700 font-semibold'
+                                                }`}
+                                            >
+                                              {assignment.site_code}: {assignment.shift_name}
+                                            </Badge>
+                                          )
+                                        })}
+                                      </div>
+                                    )}
+                                    {isOnLeave && <span className="text-xs text-red-600">(on leave)</span>}
+                                  </div>
                                 </div>
-                              </div>
-                            </button>
+                              </button>
+                            </div>
                           )
                         })
                     )}
