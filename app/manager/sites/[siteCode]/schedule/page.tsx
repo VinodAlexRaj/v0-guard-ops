@@ -861,26 +861,6 @@ export default function ManagerSchedulePage() {
                 </div>
               </div>
 
-              <div className="flex gap-2 mb-6">
-                <div className="w-32 shrink-0"></div>
-                <div className="grid grid-cols-7 gap-2 flex-1">
-                  {days.map((day, idx) => {
-                    const isToday = getLocalDateString(day) === getLocalDateString(new Date())
-                    const coverage = realCoverageData[idx] || 0
-                    return (
-                      <div
-                        key={idx}
-                        className={`p-3 rounded-lg border transition-colors ${isToday ? 'bg-blue-50 border-blue-200' : 'bg-white border-slate-200'
-                          }`}
-                      >
-                        <div className="text-xs font-semibold text-slate-700 mb-2">{dayNames[idx]}</div>
-                        <div className={`text-lg font-bold ${getCoverageColor(coverage)}`}>{coverage}%</div>
-                      </div>
-                    )
-                  })}
-                </div>
-              </div>
-
               <Card className="border-slate-200 overflow-hidden shadow-sm">
                 <div className="overflow-x-auto">
                   <table className="w-full">
@@ -889,13 +869,15 @@ export default function ManagerSchedulePage() {
                         <th className="px-4 py-3 text-left text-xs font-semibold text-slate-700 w-32">Shift</th>
                         {days.map((day, idx) => {
                           const isToday = getLocalDateString(day) === getLocalDateString(new Date())
+                          const coverage = realCoverageData[idx] || 0
                           return (
                             <th
                               key={idx}
-                              className={`px-4 py-3 text-center text-xs font-semibold ${isToday ? 'bg-blue-50' : ''
-                                } text-slate-700`}
+                              className={`px-4 py-2 text-center leading-tight ${isToday ? 'bg-blue-50' : ''
+                                }`}
                             >
-                              {dayNames[idx]}
+                              <div className="text-xs font-semibold text-slate-700">{dayNames[idx]}</div>
+                              <div className={`text-sm font-bold ${getCoverageColor(coverage)}`}>{coverage}%</div>
                             </th>
                           )
                         })}
@@ -930,10 +912,10 @@ export default function ManagerSchedulePage() {
                                   setSelectedGuard(null)
                                 }}
                                 className={`px-4 py-3 text-center cursor-pointer transition-colors ${isSelected
-                                    ? 'bg-teal-50 border-2 border-teal-300'
-                                    : isToday
-                                      ? 'bg-blue-50'
-                                      : 'hover:bg-slate-50'
+                                  ? 'bg-teal-50 border-2 border-teal-300'
+                                  : isToday
+                                    ? 'bg-blue-50'
+                                    : 'hover:bg-slate-50'
                                   }`}
                               >
                                 <div className="space-y-1">
@@ -1045,8 +1027,8 @@ export default function ManagerSchedulePage() {
                             <Badge
                               variant="secondary"
                               className={`text-xs mt-1 ${cell.assignmentType === 'planned'
-                                  ? 'bg-green-100 text-green-700'
-                                  : 'bg-amber-100 text-amber-700'
+                                ? 'bg-green-100 text-green-700'
+                                : 'bg-amber-100 text-amber-700'
                                 }`}
                             >
                               {cell.assignmentType}
@@ -1177,10 +1159,10 @@ export default function ManagerSchedulePage() {
                                   setSelectedGuard(guard)
                                 }}
                                 className={`w-full text-left px-3 py-2 rounded text-sm font-medium transition-all ${isDisabled
-                                    ? 'bg-slate-100 text-slate-400 cursor-not-allowed opacity-50'
-                                    : isSelected
-                                      ? 'bg-teal-50 text-teal-700 border-2 border-teal-300 shadow-sm'
-                                      : 'bg-slate-50 text-slate-700 hover:bg-slate-100 border border-slate-200'
+                                  ? 'bg-slate-100 text-slate-400 cursor-not-allowed opacity-50'
+                                  : isSelected
+                                    ? 'bg-teal-50 text-teal-700 border-2 border-teal-300 shadow-sm'
+                                    : 'bg-slate-50 text-slate-700 hover:bg-slate-100 border border-slate-200'
                                   }`}
                               >
                                 <div className="flex items-center justify-between gap-2">
@@ -1214,8 +1196,8 @@ export default function ManagerSchedulePage() {
                                             <Badge
                                               key={idx}
                                               className={`text-xs whitespace-nowrap border-0 ${hasTimeConflict
-                                                  ? 'bg-red-100 text-red-700 font-semibold'
-                                                  : 'bg-yellow-100 text-yellow-700 font-semibold'
+                                                ? 'bg-red-100 text-red-700 font-semibold'
+                                                : 'bg-yellow-100 text-yellow-700 font-semibold'
                                                 }`}
                                             >
                                               {assignment.site_code}: {assignment.shift_name}
