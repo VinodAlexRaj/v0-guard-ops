@@ -22,24 +22,33 @@ import {
   DialogTitle,
   DialogFooter,
 } from '@/components/ui/dialog'
-import { LogOut, ArrowLeft, Edit2, Trash2, Users, Calendar, MapPin } from 'lucide-react'
+import { LogOut, ArrowLeft, Edit2, Users, Calendar, MapPin, AlertTriangle, PowerOff, CalendarDays } from 'lucide-react'
 import { supabase } from '@/lib/supabase/client'
 import { getLocalDateString } from '@/lib/utils'
+import { toast } from 'sonner'
+import { useSiteData } from '@/app/manager/sites/hooks/useSiteData'
+import { validateSiteForm, getErrorMessage } from '@/app/manager/sites/lib/site-validation'
 
-interface SiteData {
-  id: string
-  site_code: string
-  name: string
-  address: string | null
+interface DeactivationBlocker {
+  futureShiftCount: number
+  assignedGuardCount: number
+  activeShiftDefCount: number
 }
 
-interface ShiftDefinition {
-  id: string
-  shift_name: string
-  start_time: string
-  end_time: string
-  required_headcount: number
-  is_active: boolean
+interface EditModalState {
+  isOpen: boolean
+  values: {
+    siteCode: string
+    name: string
+    address: string
+    supervisor: string
+    latitude: string
+    longitude: string
+    radius: string
+  }
+  errors: Record<string, string | undefined>
+  supervisorList: { id: string; name: string }[]
+  saving: boolean
 }
 
 export default function SiteDetailPage() {
@@ -47,28 +56,22 @@ export default function SiteDetailPage() {
   const params = useParams()
   const siteCode = (params.siteCode as string).toUpperCase()
 
-  const [loading, setLoading] = useState(true)
+  const { site, supervisor, shiftDefinitions, todayCoverage, assignedGuards, managerName, loading, error } = useSiteData(siteCode)
+
   const [dateStr, setDateStr] = useState('')
-  const [managerName, setManagerName] = useState('User')
-  const [site, setSite] = useState<SiteData | null>(null)
-  const [supervisor, setSupervisor] = useState<{ id: string; name: string } | null>(null)
-  const [shiftDefinitions, setShiftDefinitions] = useState<ShiftDefinition[]>([])
-  const [todayCoverage, setTodayCoverage] = useState({ filled: 0, total: 0 })
-  const [assignedGuards, setAssignedGuards] = useState<string[]>([])
+  const [editModal, setEditModal] = useState<EditModalState>({
+    isOpen: false,
+    values: { siteCode: '', name: '', address: '', supervisor: 'unassigned', latitude: '', longitude: '', radius: '30' },
+    errors: {},
+    supervisorList: [],
+    saving: false,
+  })
 
-  const [isEditModalOpen, setIsEditModalOpen] = useState(false)
-  const [editName, setEditName] = useState('')
-  const [editAddress, setEditAddress] = useState('')
-  const [editSupervisor, setEditSupervisor] = useState('unassigned')
-  const [supervisorList, setSupervisorList] = useState<{ id: string; name: string }[]>([])
-  const [saving, setSaving] = useState(false)
+  const [isDeactivateModalOpen, setIsDeactivateModalOpen] = useState(false)
+  const [deactivationBlocker, setDeactivationBlocker] = useState<DeactivationBlocker | null>(null)
+  const [deactivating, setDeactivating] = useState(false)
 
-  const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false)
-  const [deleting, setDeleting] = useState(false)
-
-  const handleSignOut = () => {
-    router.push('/')
-  }
+  const handleSignOut = () => router.push('/')
 
   useEffect(() => {
     const todayDate = new Date()
@@ -81,99 +84,6 @@ export default function SiteDetailPage() {
     setDateStr(formatted)
   }, [])
 
-  useEffect(() => {
-    const fetchSiteData = async () => {
-      try {
-        setLoading(true)
-
-        const {
-          data: { user },
-        } = await supabase.auth.getUser()
-
-        if (user) {
-          const { data: userData } = await supabase
-            .from('users')
-            .select('full_name')
-            .eq('id', user.id)
-            .single()
-
-          if (userData?.full_name) setManagerName(userData.full_name)
-        }
-
-        const { data: siteData, error: siteError } = await supabase
-          .from('sites')
-          .select('id, site_code, name, address')
-          .eq('site_code', siteCode)
-          .single()
-
-        if (siteError || !siteData) {
-          console.error('[v0] Site not found:', siteError)
-          setLoading(false)
-          return
-        }
-
-        setSite(siteData)
-
-        const { data: supAssignment } = await supabase
-          .from('supervisor_sites')
-          .select('supervisor_id, users(id, full_name)')
-          .eq('site_id', siteData.id)
-          .single()
-
-        if (supAssignment?.users && supAssignment.users.length > 0) {
-          const user = supAssignment.users[0]
-
-          setSupervisor({
-            id: supAssignment.supervisor_id,
-            name: user.full_name,
-          })
-        }
-
-        const { data: shifts } = await supabase
-          .from('shift_definitions')
-          .select('id, shift_name, start_time, end_time, required_headcount, is_active')
-          .eq('site_id', siteData.id)
-          .order('start_time')
-
-        setShiftDefinitions(shifts || [])
-
-        const today = getLocalDateString()
-        const { data: coverage } = await supabase
-          .from('roster_coverage')
-          .select('assigned, required_headcount')
-          .eq('site_id', siteData.id)
-          .eq('shift_date', today)
-
-        const totalRequired = (coverage || []).reduce((sum, c) => sum + c.required_headcount, 0)
-        const totalAssigned = (coverage || []).reduce((sum, c) => sum + c.assigned, 0)
-        setTodayCoverage({ filled: totalAssigned, total: totalRequired })
-
-        const { data: assignments } = await supabase
-          .from('shift_assignments')
-          .select('guard_id, users(full_name)')
-          .eq('site_id', siteData.id)
-          .eq('shift_date', today)
-          .eq('is_cancelled', false)
-
-        const guardNames = [
-          ...new Set(
-            (assignments || [])
-              .map(a => a.users?.[0]?.full_name)
-              .filter(Boolean)
-          ),
-        ] as string[]
-
-        setAssignedGuards(guardNames)
-      } catch (error) {
-        console.error('[v0] Error fetching site data:', error)
-      } finally {
-        setLoading(false)
-      }
-    }
-
-    fetchSiteData()
-  }, [siteCode])
-
   const fetchSupervisors = async () => {
     const { data } = await supabase
       .from('users')
@@ -184,128 +94,258 @@ export default function SiteDetailPage() {
     return data ? data.map(u => ({ id: u.id, name: u.full_name })) : []
   }
 
-  const handleOpenEditModal = () => {
+  const handleOpenEditModal = async () => {
     if (!site) return
 
-    setEditName(site.name)
-    setEditAddress(site.address || '')
-    setEditSupervisor(supervisor?.id || 'unassigned')
-    setIsEditModalOpen(true)
+    const supervisors = await fetchSupervisors()
+    setEditModal(prev => ({
+      ...prev,
+      isOpen: true,
+      values: {
+        siteCode: site.site_code,
+        name: site.name,
+        address: site.address || '',
+        supervisor: supervisor?.id || 'unassigned',
+        latitude: site.latitude != null ? String(site.latitude) : '',
+        longitude: site.longitude != null ? String(site.longitude) : '',
+        radius: site.geofence_radius != null ? String(site.geofence_radius) : '30',
+      },
+      supervisorList: supervisors,
+      errors: {},
+    }))
+  }
 
-    fetchSupervisors()
-      .then((supervisors) => {
-        setSupervisorList(supervisors)
-      })
-      .catch((err) => {
-        console.error('[v0] Error fetching supervisors:', err)
-      })
+  const updateEditModalValue = <K extends keyof EditModalState['values']>(
+    field: K,
+    value: EditModalState['values'][K]
+  ) => {
+    setEditModal(prev => ({
+      ...prev,
+      values: { ...prev.values, [field]: value },
+      errors: { ...prev.errors, [field]: undefined },
+    }))
   }
 
   const handleSaveEdit = async () => {
-    if (!site || !editName.trim()) {
-      alert('Site name is required')
+    if (!site) return
+
+    // Validate form
+    const errors = validateSiteForm({
+      name: editModal.values.name,
+      siteCode: editModal.values.siteCode,
+      latitude: editModal.values.latitude,
+      longitude: editModal.values.longitude,
+      radius: editModal.values.radius,
+    })
+
+    if (Object.keys(errors).length > 0) {
+      setEditModal(prev => ({ ...prev, errors }))
       return
     }
 
-    setSaving(true)
+    setEditModal(prev => ({ ...prev, saving: true }))
+
     try {
+      // Parse geofence values
+      const hasGeo = editModal.values.latitude || editModal.values.longitude
+      let geoValues: { lat: number; lon: number; radius: number } | null = null
+
+      if (hasGeo) {
+        geoValues = {
+          lat: parseFloat(editModal.values.latitude),
+          lon: parseFloat(editModal.values.longitude),
+          radius: parseInt(editModal.values.radius),
+        }
+      }
+
+      // Build update payload
+      const updatePayload: Record<string, unknown> = {
+        site_code: editModal.values.siteCode.toUpperCase(),
+        name: editModal.values.name.trim(),
+        address: editModal.values.address.trim() || null,
+      }
+
+      if (geoValues) {
+        updatePayload.latitude = geoValues.lat
+        updatePayload.longitude = geoValues.lon
+        updatePayload.geofence_radius = geoValues.radius
+        updatePayload.has_kiosk = true
+      }
+
+      // Update site
       const { error: updateError } = await supabase
         .from('sites')
-        .update({
-          name: editName.trim(),
-          address: editAddress.trim() || null,
-        })
+        .update(updatePayload)
         .eq('id', site.id)
 
       if (updateError) {
-        console.error('[v0] Error updating site:', updateError)
-        alert('Error updating site: ' + updateError.message)
-        setSaving(false)
+        const message = getErrorMessage(updateError)
+        toast.error(message)
+        if (updateError.code === '23505') {
+          setEditModal(prev => ({ ...prev, errors: { ...prev.errors, siteCode: message } }))
+        }
         return
       }
 
-      const normalizedSupervisor =
-        editSupervisor === 'unassigned' ? '' : editSupervisor
-
-      if (normalizedSupervisor !== (supervisor?.id || '')) {
-        await supabase
-          .from('supervisor_sites')
-          .delete()
-          .eq('site_id', site.id)
-
-        if (normalizedSupervisor) {
-          await supabase
-            .from('supervisor_sites')
-            .insert({
-              supervisor_id: normalizedSupervisor,
-              site_id: site.id,
-            })
-        }
+      // Upsert geofence if provided
+      if (geoValues) {
+        const { data: { user } } = await supabase.auth.getUser()
+        await supabase.from('geofence_config').upsert(
+          {
+            site_id: site.id,
+            center_latitude: geoValues.lat,
+            center_longitude: geoValues.lon,
+            radius_meters: geoValues.radius,
+            configured_by_user_id: user?.id,
+            last_updated_at: new Date().toISOString(),
+            is_active: true,
+          },
+          { onConflict: 'site_id' }
+        )
       }
 
-      setIsEditModalOpen(false)
-
-      setSite(prev =>
-        prev
-          ? {
-            ...prev,
-            name: editName.trim(),
-            address: editAddress.trim() || null,
-          }
-          : prev
-      )
-
-      if (editSupervisor === 'unassigned') {
-        setSupervisor(null)
-      } else {
-        const selected = supervisorList.find(s => s.id === editSupervisor)
-        if (selected) {
-          setSupervisor(selected)
-        }
+      // Update supervisor
+      const normalizedSupervisor = editModal.values.supervisor === 'unassigned' ? '' : editModal.values.supervisor
+      await supabase.from('supervisor_sites').delete().eq('site_id', site.id)
+      if (normalizedSupervisor) {
+        await supabase.from('supervisor_sites').insert({
+          supervisor_id: normalizedSupervisor,
+          site_id: site.id,
+        })
       }
-    } catch (error) {
-      console.error('[v0] Error saving site:', error)
-      alert('Error saving site')
+
+      setEditModal(prev => ({ ...prev, isOpen: false }))
+      toast.success('Site updated successfully')
+
+      // If site code changed, navigate to new URL
+      if (editModal.values.siteCode.toUpperCase() !== site.site_code) {
+        router.push(`/manager/sites/${editModal.values.siteCode.toUpperCase()}`)
+        return
+      }
+
+      // Otherwise refresh the page to show updates
+      router.refresh()
+    } catch (err) {
+      console.error('[v0] Error saving site:', err)
+      toast.error('Failed to save site')
     } finally {
-      setSaving(false)
+      setEditModal(prev => ({ ...prev, saving: false }))
     }
   }
 
-  const handleDeleteSite = async () => {
+  const handleToggleSiteStatus = async () => {
     if (!site) return
 
-    setDeleting(true)
+    // Reactivation — no checks
+    if (!site.is_active) {
+      if (!confirm(`Reactivate ${site.site_code}?`)) return
+      try {
+        const { error } = await supabase.from('sites').update({ is_active: true }).eq('id', site.id)
+        if (error) throw error
+        toast.success('Site reactivated')
+        router.refresh()
+      } catch (err) {
+        console.error('[v0] Error reactivating:', err)
+        toast.error('Failed to reactivate site')
+      }
+      return
+    }
+
+    // Deactivation — check for blockers
     try {
-      await supabase
-        .from('supervisor_sites')
-        .delete()
-        .eq('site_id', site.id)
+      const today = getLocalDateString()
 
-      const { error } = await supabase
-        .from('sites')
-        .delete()
-        .eq('id', site.id)
+      const { data: futureSlotsData } = await supabase
+        .from('roster_slots').select('id').eq('site_id', site.id).gte('shift_date', today)
 
-      if (error) {
-        console.error('[v0] Error deleting site:', error)
-        alert('Error deleting site: ' + error.message)
-        setDeleting(false)
+      const futureSlotIds = futureSlotsData?.map(s => s.id) || []
+      let assignedGuardCount = 0
+
+      if (futureSlotIds.length > 0) {
+        const { data: assignmentsData } = await supabase
+          .from('shift_assignments').select('id, guard_id')
+          .in('roster_slot_id', futureSlotIds).eq('is_cancelled', false)
+        assignedGuardCount = new Set(assignmentsData?.map(a => a.guard_id) || []).size
+      }
+
+      const { data: activeShiftDefs } = await supabase
+        .from('shift_definitions').select('id').eq('site_id', site.id).eq('is_active', true)
+      const activeShiftDefCount = activeShiftDefs?.length || 0
+
+      // No blockers — simple confirm
+      if (futureSlotIds.length === 0 && activeShiftDefCount === 0) {
+        if (!confirm(`Deactivate ${site.site_code}? This will hide it from supervisors.`)) return
+        await performDeactivation()
         return
       }
 
-      router.push('/manager/sites')
-    } catch (error) {
-      console.error('[v0] Error deleting site:', error)
-      alert('Error deleting site')
-    } finally {
-      setDeleting(false)
+      // Blockers exist — show modal
+      setDeactivationBlocker({
+        futureShiftCount: futureSlotIds.length,
+        assignedGuardCount,
+        activeShiftDefCount,
+      })
+      setIsDeactivateModalOpen(true)
+    } catch (err) {
+      console.error('[v0] Error checking deactivation:', err)
+      toast.error('Failed to check site status')
     }
   }
 
-  const fillRate =
-    todayCoverage.total > 0
-      ? Math.round((todayCoverage.filled / todayCoverage.total) * 100)
-      : 100
+  const performDeactivation = async () => {
+    if (!site) return
+    try {
+      const { error } = await supabase.from('sites').update({ is_active: false }).eq('id', site.id)
+      if (error) throw error
+      toast.success('Site deactivated')
+      router.refresh()
+    } catch (err) {
+      console.error('[v0] Error deactivating:', err)
+      toast.error('Failed to deactivate site')
+    }
+  }
+
+  const handleForceDeactivate = async () => {
+    if (!deactivationBlocker || !site) return
+    setDeactivating(true)
+
+    try {
+      const today = getLocalDateString()
+      const changes: Array<() => Promise<void>> = []
+
+      // Step 1 — Cancel all future assignments
+      const { data: futureSlots } = await supabase
+        .from('roster_slots').select('id').eq('site_id', site.id).gte('shift_date', today)
+
+      if (futureSlots && futureSlots.length > 0) {
+        const slotIds = futureSlots.map(s => s.id)
+        const { error } = await supabase.from('shift_assignments')
+          .update({ is_cancelled: true }).in('roster_slot_id', slotIds).eq('is_cancelled', false)
+        if (error) throw error
+      }
+
+      // Step 2 — Deactivate shifts
+      const { error: shiftsError } = await supabase.from('shift_definitions')
+        .update({ is_active: false }).eq('site_id', site.id).eq('is_active', true)
+      if (shiftsError) throw shiftsError
+
+      // Step 3 — Deactivate site
+      await performDeactivation()
+
+      setIsDeactivateModalOpen(false)
+      setDeactivationBlocker(null)
+      toast.success('Site deactivated — all future shifts cancelled')
+    } catch (err) {
+      console.error('[v0] Error force deactivating:', err)
+      toast.error('Failed to deactivate site')
+    } finally {
+      setDeactivating(false)
+    }
+  }
+
+  const fillRate = todayCoverage.total > 0
+    ? Math.round((todayCoverage.filled / todayCoverage.total) * 100)
+    : 100
 
   const getFillRateColor = (rate: number) => {
     if (rate >= 80) return 'text-green-600'
@@ -324,7 +364,7 @@ export default function SiteDetailPage() {
   if (!site) {
     return (
       <div className="flex flex-col items-center justify-center min-h-screen gap-4">
-        <p className="text-slate-600">Site not found</p>
+        <p className="text-slate-600">{error || 'Site not found'}</p>
         <Button asChild variant="outline">
           <Link href="/manager/sites">Back to Sites</Link>
         </Button>
@@ -387,17 +427,23 @@ export default function SiteDetailPage() {
               )}
             </div>
             <div className="flex gap-2">
+              <Button variant="outline" asChild className="bg-teal-50 text-teal-700 border-teal-200 hover:bg-teal-100">
+                <Link href={`/manager/sites/${site.site_code}/schedule`}>
+                  <CalendarDays className="w-4 h-4 mr-2" />
+                  View Schedule
+                </Link>
+              </Button>
               <Button variant="outline" onClick={handleOpenEditModal}>
                 <Edit2 className="w-4 h-4 mr-2" />
                 Edit
               </Button>
               <Button
                 variant="outline"
-                onClick={() => setIsDeleteDialogOpen(true)}
-                className="text-red-600 hover:text-red-700 hover:bg-red-50"
+                onClick={handleToggleSiteStatus}
+                className={site.is_active ? 'text-red-600 hover:text-red-700 hover:bg-red-50' : 'text-green-600 hover:text-green-700 hover:bg-green-50'}
               >
-                <Trash2 className="w-4 h-4 mr-2" />
-                Delete
+                <PowerOff className="w-4 h-4 mr-2" />
+                {site.is_active ? 'Deactivate' : 'Reactivate'}
               </Button>
             </div>
           </div>
@@ -457,23 +503,19 @@ export default function SiteDetailPage() {
                   </th>
                 </tr>
               </thead>
-              <tbody>
-                {shiftDefinitions.map((shift) => (
-                  <tr key={shift.id} className="border-b border-slate-200">
+              <tbody className="divide-y divide-slate-200">
+                {shiftDefinitions.map(shift => (
+                  <tr key={shift.id} className="hover:bg-slate-50">
                     <td className="px-4 py-3 text-sm text-slate-900">{shift.shift_name}</td>
-                    <td className="px-4 py-3 text-sm text-slate-700">
-                      {shift.start_time.slice(0, 5)} - {shift.end_time.slice(0, 5)}
+                    <td className="px-4 py-3 text-sm text-slate-600">
+                      {shift.start_time} — {shift.end_time}
                     </td>
-                    <td className="px-4 py-3 text-sm text-slate-700">
+                    <td className="px-4 py-3 text-sm font-medium text-slate-900">
                       {shift.required_headcount}
                     </td>
-                    <td className="px-4 py-3">
+                    <td className="px-4 py-3 text-sm">
                       <Badge
-                        className={
-                          shift.is_active
-                            ? 'bg-green-100 text-green-700 border-0'
-                            : 'bg-slate-100 text-slate-600 border-0'
-                        }
+                        className={shift.is_active ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-600'}
                       >
                         {shift.is_active ? 'Active' : 'Inactive'}
                       </Badge>
@@ -497,61 +539,73 @@ export default function SiteDetailPage() {
               No guards assigned for today.
             </div>
           ) : (
-            <div className="p-4 flex flex-wrap gap-2">
-              {assignedGuards.map((guard, idx) => (
-                <Badge key={idx} variant="secondary" className="text-sm py-1 px-3">
-                  {guard}
-                </Badge>
-              ))}
+            <div className="p-4">
+              <ul className="space-y-2">
+                {assignedGuards.map((guard, i) => (
+                  <li key={i} className="text-sm text-slate-700">
+                    • {guard}
+                  </li>
+                ))}
+              </ul>
             </div>
           )}
         </Card>
       </div>
 
-      <Dialog open={isEditModalOpen} onOpenChange={setIsEditModalOpen}>
+      {/* Edit Modal */}
+      <Dialog open={editModal.isOpen} onOpenChange={(open) => setEditModal(prev => ({ ...prev, isOpen: open }))}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle>Edit Site</DialogTitle>
           </DialogHeader>
           <div className="space-y-4 py-4">
-            <div className="space-y-2">
-              <Label htmlFor="editSiteCode">Site Code</Label>
+            <div>
+              <Label htmlFor="editSiteCode">Site Code *</Label>
               <Input
                 id="editSiteCode"
-                value={site.site_code}
-                disabled
-                className="bg-slate-100"
+                type="text"
+                maxLength={7}
+                value={editModal.values.siteCode}
+                onChange={(e) => updateEditModalValue('siteCode', e.target.value.toUpperCase())}
+                placeholder="e.g. KLSNT01"
               />
-              <p className="text-xs text-slate-500">Site code cannot be changed</p>
+              {editModal.errors.siteCode && (
+                <p className="text-xs text-red-600 mt-1">{editModal.errors.siteCode}</p>
+              )}
             </div>
 
-            <div className="space-y-2">
-              <Label htmlFor="editSiteName">Site Name *</Label>
+            <div>
+              <Label htmlFor="editName">Site Name *</Label>
               <Input
-                id="editSiteName"
-                value={editName}
-                onChange={(e) => setEditName(e.target.value)}
+                id="editName"
+                value={editModal.values.name}
+                onChange={(e) => updateEditModalValue('name', e.target.value)}
+              />
+              {editModal.errors.name && (
+                <p className="text-xs text-red-600 mt-1">{editModal.errors.name}</p>
+              )}
+            </div>
+
+            <div>
+              <Label htmlFor="editAddress">Address</Label>
+              <textarea
+                id="editAddress"
+                value={editModal.values.address}
+                onChange={(e) => updateEditModalValue('address', e.target.value)}
+                rows={2}
+                className="w-full px-3 py-2 border border-slate-300 rounded-md text-sm"
               />
             </div>
 
-            <div className="space-y-2">
-              <Label htmlFor="editSiteAddress">Address</Label>
-              <Input
-                id="editSiteAddress"
-                value={editAddress}
-                onChange={(e) => setEditAddress(e.target.value)}
-              />
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="editSupervisor">Assign Supervisor</Label>
-              <Select value={editSupervisor} onValueChange={setEditSupervisor}>
+            <div>
+              <Label htmlFor="editSupervisor">Supervisor</Label>
+              <Select value={editModal.values.supervisor} onValueChange={(v) => updateEditModalValue('supervisor', v)}>
                 <SelectTrigger>
-                  <SelectValue placeholder="Select a supervisor" />
+                  <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="unassigned">Unassigned</SelectItem>
-                  {supervisorList.map((sup) => (
+                  {editModal.supervisorList.map((sup) => (
                     <SelectItem key={sup.id} value={sup.id}>
                       {sup.name}
                     </SelectItem>
@@ -559,44 +613,116 @@ export default function SiteDetailPage() {
                 </SelectContent>
               </Select>
             </div>
+
+            <div>
+              <Label>Geofence (optional)</Label>
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <Label htmlFor="editLat" className="text-xs text-slate-500">Latitude</Label>
+                  <Input
+                    id="editLat"
+                    type="number"
+                    step="any"
+                    value={editModal.values.latitude}
+                    onChange={(e) => updateEditModalValue('latitude', e.target.value)}
+                    placeholder="e.g. 3.1478"
+                    className="text-sm"
+                  />
+                  {editModal.errors.latitude && (
+                    <p className="text-xs text-red-600 mt-1">{editModal.errors.latitude}</p>
+                  )}
+                </div>
+                <div>
+                  <Label htmlFor="editLon" className="text-xs text-slate-500">Longitude</Label>
+                  <Input
+                    id="editLon"
+                    type="number"
+                    step="any"
+                    value={editModal.values.longitude}
+                    onChange={(e) => updateEditModalValue('longitude', e.target.value)}
+                    placeholder="e.g. 101.6953"
+                    className="text-sm"
+                  />
+                  {editModal.errors.longitude && (
+                    <p className="text-xs text-red-600 mt-1">{editModal.errors.longitude}</p>
+                  )}
+                </div>
+              </div>
+              <div className="mt-2">
+                <Label htmlFor="editRadius" className="text-xs text-slate-500">Radius (metres, 10–500)</Label>
+                <Input
+                  id="editRadius"
+                  type="number"
+                  value={editModal.values.radius}
+                  onChange={(e) => updateEditModalValue('radius', e.target.value)}
+                  min="10"
+                  max="500"
+                  className="text-sm"
+                />
+                {editModal.errors.radius && (
+                  <p className="text-xs text-red-600 mt-1">{editModal.errors.radius}</p>
+                )}
+              </div>
+            </div>
           </div>
 
           <DialogFooter>
-            <Button variant="outline" onClick={() => setIsEditModalOpen(false)}>
+            <Button variant="outline" onClick={() => setEditModal(prev => ({ ...prev, isOpen: false }))}>
               Cancel
             </Button>
             <Button
               onClick={handleSaveEdit}
-              disabled={saving}
+              disabled={editModal.saving}
               className="bg-teal-600 hover:bg-teal-700 text-white"
             >
-              {saving ? 'Saving...' : 'Save Changes'}
+              {editModal.saving ? 'Saving...' : 'Save Changes'}
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
-      <Dialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
+      {/* Deactivation Blocker Modal */}
+      <Dialog open={isDeactivateModalOpen} onOpenChange={setIsDeactivateModalOpen}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>Delete Site</DialogTitle>
+            <DialogTitle className="flex items-center gap-2 text-amber-700">
+              <AlertTriangle className="w-5 h-5" />
+              Cannot Deactivate — Action Required
+            </DialogTitle>
           </DialogHeader>
-          <div className="py-4">
-            <p className="text-slate-600">
-              Are you sure you want to delete <strong>{site.name}</strong> ({site.site_code})?
-              This action cannot be undone.
-            </p>
-          </div>
+          {deactivationBlocker && (
+            <div className="py-4 space-y-3">
+              <p className="text-sm text-slate-700">
+                Deactivating <strong>{site.site_code}</strong> will automatically:
+              </p>
+              <ul className="text-sm text-slate-600 list-disc list-inside space-y-1">
+                {deactivationBlocker.futureShiftCount > 0 && (
+                  <li>Cancel {deactivationBlocker.futureShiftCount} upcoming roster slot{deactivationBlocker.futureShiftCount !== 1 ? 's' : ''}</li>
+                )}
+                {deactivationBlocker.assignedGuardCount > 0 && (
+                  <li>Unassign {deactivationBlocker.assignedGuardCount} guard{deactivationBlocker.assignedGuardCount !== 1 ? 's' : ''}</li>
+                )}
+                {deactivationBlocker.activeShiftDefCount > 0 && (
+                  <li>Deactivate {deactivationBlocker.activeShiftDefCount} shift definition{deactivationBlocker.activeShiftDefCount !== 1 ? 's' : ''}</li>
+                )}
+                <li>Mark the site as inactive</li>
+              </ul>
+              <p className="text-sm text-slate-500">Do you want to proceed?</p>
+            </div>
+          )}
           <DialogFooter>
-            <Button variant="outline" onClick={() => setIsDeleteDialogOpen(false)}>
+            <Button
+              variant="outline"
+              onClick={() => { setIsDeactivateModalOpen(false); setDeactivationBlocker(null) }}
+            >
               Cancel
             </Button>
             <Button
-              onClick={handleDeleteSite}
-              disabled={deleting}
+              onClick={handleForceDeactivate}
+              disabled={deactivating}
               className="bg-red-600 hover:bg-red-700 text-white"
             >
-              {deleting ? 'Deleting...' : 'Delete Site'}
+              {deactivating ? 'Deactivating...' : 'Deactivate Anyway'}
             </Button>
           </DialogFooter>
         </DialogContent>

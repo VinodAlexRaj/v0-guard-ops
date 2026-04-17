@@ -2,7 +2,7 @@
 
 import { usePathname } from 'next/navigation'
 import Link from 'next/link'
-import { LayoutDashboard, Building2, Users, CalendarClock, ShieldCheck, CalendarOff, BarChart3, PanelLeftClose, PanelLeftOpen } from 'lucide-react'
+import { LayoutDashboard, Building2, Users, CalendarClock, ShieldCheck, CalendarOff, BarChart3, PanelLeftClose, PanelLeftOpen, CalendarDays } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { useSidebar } from '@/components/sidebar-context'
 
@@ -15,6 +15,7 @@ export default function ManagerSidebar() {
     { label: 'All Sites', href: '/manager/sites', icon: Building2 },
     { label: 'Supervisors', href: '/manager/supervisors', icon: Users },
     { label: 'Shift Setup', href: '/manager/shifts', icon: CalendarClock },
+    { label: 'Scheduler', href: '/manager/schedule', icon: CalendarDays },
     { label: 'Guard Management', href: '/manager/guards', icon: ShieldCheck },
     { label: 'Leave Management', href: '/manager/leaves', icon: CalendarOff },
     { label: 'Reports', href: '/manager/reports', icon: BarChart3 },

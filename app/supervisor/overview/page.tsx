@@ -101,9 +101,9 @@ export default function SupervisorOverviewPage() {
         const siteMap: Record<string, { id: string; code: string; name: string }> = {}
         supervisorSites.forEach(ss => {
           siteMap[ss.site_id] = {
-            id: ss.sites.id,
-            code: ss.sites.site_code,
-            name: ss.sites.name,
+            id: ss.sites[0]?.id || '',
+            code: ss.sites[0]?.site_code || '',
+            name: ss.sites[0]?.name || '',
           }
         })
 
@@ -141,7 +141,7 @@ export default function SupervisorOverviewPage() {
           .eq('status', 'absent')
 
         const absents = (absentsRaw || []).filter(
-          a => a.shift_assignments && siteIds.includes(a.shift_assignments.site_id)
+          a => !!a.shift_assignments?.some((sa: any) => siteIds.includes(sa.site_id))
         )
 
         // STEP 3 — BUILD SITE ROWS (coverage-based calculations only)
@@ -203,13 +203,13 @@ export default function SupervisorOverviewPage() {
 
         // BUILD ABSENCE GUARDS TABLE
         const absenceList: AbsentGuard[] = absents.map(a => {
-          const assignment = a.shift_assignments
-          const guardName = assignment?.users?.full_name || 'Unknown'
-          const siteCode = assignment?.roster_slots?.sites?.site_code || 'Unknown'
+          const assignment = a.shift_assignments?.[0]
+          const guardName = assignment?.users?.[0]?.full_name || 'Unknown'
+          const siteCode = assignment?.roster_slots?.[0]?.sites?.[0]?.site_code || 'Unknown'
           // Get shift name from shift_definitions by ID
           const shiftDef = supervisorSites
             .find(ss => ss.site_id === assignment?.site_id)
-            ?.sites?.site_code
+            ?.sites?.[0]?.site_code
 
           return {
             name: guardName,

@@ -14,7 +14,7 @@ import {
   DialogFooter,
 } from '@/components/ui/dialog'
 import { Label } from '@/components/ui/label'
-import { LogOut, Eye, Plus, Pencil, PowerOff, AlertTriangle } from 'lucide-react'
+import { LogOut, Eye, Plus, Pencil, PowerOff, AlertTriangle, CalendarDays } from 'lucide-react'
 import { supabase } from '@/lib/supabase/client'
 import { getLocalDateString } from '@/lib/utils'
 import { toast } from 'sonner'
@@ -486,11 +486,16 @@ export default function ManagerSitesPage() {
 
       const siteDataList: SiteData[] = sitesData.map(site => {
         const sup = supSitesRes.data?.find(s => s.site_id === site.id)
-        // Supabase returns related rows as an array — take first element
-        const usersArr = sup?.users as unknown as { full_name: string }[] | null
-        const supervisorName = Array.isArray(usersArr) && usersArr.length > 0
-          ? usersArr[0].full_name
-          : null
+        // Supabase FK join returns object for single relation, array for multiple
+        const usersData = sup?.users as unknown
+        let supervisorName: string | null = null
+        if (usersData) {
+          if (Array.isArray(usersData) && usersData.length > 0) {
+            supervisorName = usersData[0].full_name
+          } else if (typeof usersData === 'object' && 'full_name' in (usersData as object)) {
+            supervisorName = (usersData as { full_name: string }).full_name
+          }
+        }
         const supervisorId = sup?.supervisor_id ?? null
 
         const activeShifts = shiftDefsRes.data?.filter(sd => sd.site_id === site.id).length || 0
@@ -755,6 +760,11 @@ export default function ManagerSitesPage() {
                           onClick={() => handleViewSite(sd.site.site_code)}
                           className="text-slate-600 hover:text-slate-900">
                           <Eye className="w-4 h-4" />
+                        </Button>
+                        <Button variant="ghost" size="sm" title="View schedule"
+                          onClick={() => router.push(`/manager/sites/${sd.site.site_code}/schedule`)}
+                          className="text-teal-600 hover:text-teal-800">
+                          <CalendarDays className="w-4 h-4" />
                         </Button>
                         <Button variant="ghost" size="sm" title="Edit site"
                           onClick={() => handleOpenEditModal(sd)}
